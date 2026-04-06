@@ -24,25 +24,77 @@ const CONFIG = {
     shockwaveSlowFactor: 0.58,
     shockwaveSlowSeconds: 1.85,
     shockwaveVisualSeconds: 0.65,
+    itemPool: ["boost", "missile", "mine", "shockwave"],
     pickupPoints: 8,
+    missileSpeed: 34,
+    missileTurnRate: 3.8,
+    missileLifeSeconds: 4.8,
+    missileHitRadius: 2.1,
+    missileSlowSeconds: 2.6,
+    missileSpeedDamping: 0.36,
+    mineArmSeconds: 0.45,
+    mineLifeSeconds: 18,
+    mineTriggerRadius: 2.4,
+    mineSlowSeconds: 2.2,
+    mineSpeedDamping: 0.3,
   },
   ghost: {
     sampleInterval: 1 / 30,
   },
   save: {
     storageKey: "neon-bend-rush-save-v1",
+    leaderboardLimit: 10,
   },
-  track: {
-    halfX: 68,
-    halfZ: 44,
-    cornerRadius: 24,
-    width: 24,
+  trackDefaults: {
     wallHeight: 1.8,
-    straightSamples: 34,
-    arcSamples: 26,
     checkpointCount: 6,
     resetMargin: 1.4,
     startProgress: 6,
+  },
+  trackPresets: {
+    speedway: {
+      label: "霓虹环线",
+      description: "高速直道更多，适合连续漂移后接增压冲刺。",
+      halfX: 68,
+      halfZ: 44,
+      cornerRadius: 24,
+      width: 24,
+      straightSamples: 34,
+      arcSamples: 26,
+      pickupPoints: 8,
+      groundRadius: 260,
+      innerFieldRadius: 55,
+      barrierColors: [0xe7e7e7, 0xff5c62],
+      laneMarkerColor: 0xf5f5f5,
+      directionMarkerColor: 0xffce56,
+      startArchColor: 0x79d8ff,
+      startArchEmissive: 0x15354d,
+      supportText: "长直道更适合积攒增压后全油门冲线。",
+    },
+    canyon: {
+      label: "赤岩峡谷",
+      description: "弯道更密、赛道更窄，更考验控车和道具时机。",
+      halfX: 56,
+      halfZ: 52,
+      cornerRadius: 16,
+      width: 22,
+      straightSamples: 30,
+      arcSamples: 24,
+      pickupPoints: 10,
+      groundRadius: 248,
+      innerFieldRadius: 43,
+      barrierColors: [0xf5ddbf, 0xc97a57],
+      laneMarkerColor: 0xfff3dd,
+      directionMarkerColor: 0xffcf6f,
+      startArchColor: 0xffb168,
+      startArchEmissive: 0x4d2415,
+      supportText: "连续回旋弯更多，别太早把漂移蓄能交掉。",
+    },
+  },
+  audio: {
+    masterVolume: 0.18,
+    collisionThreshold: 7,
+    collisionCooldown: 0.16,
   },
   playerPhysics: {
     maxSpeed: 45,
@@ -326,16 +378,27 @@ const ui = {
   boostValue: document.getElementById("boost-value"),
   difficultyValue: document.getElementById("difficulty-value"),
   weatherValue: document.getElementById("weather-value"),
+  trackValue: document.getElementById("track-value"),
   statusValue: document.getElementById("status-value"),
+  trackDescription: document.getElementById("track-description"),
+  trackButtons: [...document.querySelectorAll("[data-track]")],
+  hudSupportText: document.querySelector("#hud-time-card .hud-support-text"),
+  minimapPanel: document.getElementById("minimap-panel"),
+  minimapCanvas: document.getElementById("minimap-canvas"),
+  minimapTrackLabel: document.getElementById("minimap-track-label"),
   difficultyDescription: document.getElementById("difficulty-description"),
   difficultyButtons: [...document.querySelectorAll("[data-difficulty]")],
   weatherDescription: document.getElementById("weather-description"),
   weatherButtons: [...document.querySelectorAll("[data-weather]")],
+  startBestTotal: document.getElementById("start-best-total"),
+  startBestLap: document.getElementById("start-best-lap"),
+  startLeaderboardList: document.getElementById("start-leaderboard-list"),
   resultScreen: document.getElementById("result-screen"),
   resultTitle: document.getElementById("result-title"),
   resultSummary: document.getElementById("result-summary"),
   resultList: document.getElementById("result-list"),
   lapTimeList: document.getElementById("lap-time-list"),
+  historyList: document.getElementById("history-list"),
   recordBestTotal: document.getElementById("record-best-total"),
   recordBestLap: document.getElementById("record-best-lap"),
   recordFlags: document.getElementById("record-flags"),
@@ -374,6 +437,8 @@ const gameState = {
   difficultyConfig: null,
   selectedWeatherId: "day",
   weatherConfig: null,
+  selectedTrackId: "speedway",
+  trackConfig: null,
   noticeText: "等待开始",
   noticeTimer: 0,
   results: [],
@@ -405,12 +470,15 @@ const ghostSystem = createGhostSystem();
 const itemSystem = createItemSystem();
 const debugPanel = createDebugPanel();
 const modelSystem = createModelSystem();
+const minimapSystem = createMiniMapSystem();
+const soundSystem = createSoundSystem();
 
 boot();
 
 // 初始化顺序保持固定：渲染器、场景、赛道、UI、输入、初始摆放。
 function boot() {
   saveSystem.load();
+  gameState.trackConfig = getSelectedTrackConfig(gameState.selectedTrackId);
   setupRenderer();
   setupScene();
   setupWorld();
@@ -422,6 +490,8 @@ function boot() {
   itemSystem.init();
   ghostSystem.init();
   debugPanel.init();
+  minimapSystem.init();
+  saveSystem.renderBoards();
   resetRace();
   renderHUD();
   animate();
@@ -498,15 +568,23 @@ function setupWorld() {
 function setupTrackAndCars() {
   gameState.track = createTrack();
   gameState.scene.add(gameState.track.group);
+  updateWorldForTrack();
 
   gameState.player = createCar("player", 0xff8648, CONFIG.names.player);
   gameState.scene.add(gameState.player.mesh);
   applyDifficultySelection(gameState.selectedDifficultyId);
+  applyTrackSelection(gameState.selectedTrackId);
   weatherSystem.apply(gameState.selectedWeatherId);
   rebuildAIField();
 }
 
 function setupUI() {
+  for (const button of ui.trackButtons) {
+    button.addEventListener("click", () => {
+      applyTrackSelection(button.dataset.track);
+    });
+  }
+
   for (const button of ui.difficultyButtons) {
     button.addEventListener("click", () => {
       applyDifficultySelection(button.dataset.difficulty);
@@ -520,12 +598,14 @@ function setupUI() {
   }
 
   ui.startButton.addEventListener("click", () => {
+    soundSystem.init();
     ui.startScreen.classList.remove("visible");
     ui.startScreen.classList.add("hidden");
     startCountdown();
   });
 
   ui.restartButton.addEventListener("click", () => {
+    soundSystem.init();
     ui.resultScreen.classList.remove("visible");
     ui.resultScreen.classList.add("hidden");
     startCountdown();
@@ -548,6 +628,34 @@ function applyDifficultySelection(difficultyId) {
   renderHUD();
 }
 
+function getSelectedTrackConfig(trackId) {
+  const preset = CONFIG.trackPresets[trackId] ?? CONFIG.trackPresets.speedway;
+  return {
+    ...CONFIG.trackDefaults,
+    ...preset,
+  };
+}
+
+function applyTrackSelection(trackId) {
+  gameState.selectedTrackId = trackId in CONFIG.trackPresets ? trackId : "speedway";
+  gameState.trackConfig = getSelectedTrackConfig(gameState.selectedTrackId);
+
+  if (ui.trackDescription) {
+    ui.trackDescription.textContent = gameState.trackConfig.description;
+  }
+
+  for (const button of ui.trackButtons) {
+    button.classList.toggle("active", button.dataset.track === gameState.selectedTrackId);
+  }
+
+  if (gameState.scene && gameState.track && ui.startScreen.classList.contains("visible")) {
+    rebuildTrack();
+  }
+
+  renderHUD();
+  saveSystem.renderBoards();
+}
+
 function applyWeatherSelection(weatherId) {
   const nextWeather = CONFIG.weatherPresets[weatherId] ?? CONFIG.weatherPresets.day;
   gameState.selectedWeatherId = weatherId in CONFIG.weatherPresets ? weatherId : "day";
@@ -561,11 +669,47 @@ function applyWeatherSelection(weatherId) {
   renderHUD();
 }
 
+function rebuildTrack() {
+  if (gameState.track?.group) {
+    gameState.scene.remove(gameState.track.group);
+  }
+
+  gameState.track = createTrack();
+  gameState.scene.add(gameState.track.group);
+  updateWorldForTrack();
+
+  if (itemSystem.boxGroup) {
+    itemSystem.buildBoxes();
+  }
+
+  if (gameState.cars.length > 0) {
+    resetRace();
+  }
+
+  minimapSystem.setTrack(gameState.track);
+  modelSystem.populateScene();
+  weatherSystem.apply(gameState.selectedWeatherId);
+}
+
+function updateWorldForTrack() {
+  const track = gameState.trackConfig ?? getSelectedTrackConfig(gameState.selectedTrackId);
+  if (gameState.world.ground) {
+    gameState.world.ground.scale.setScalar(track.groundRadius / 260);
+  }
+  if (gameState.world.innerField) {
+    gameState.world.innerField.scale.setScalar(track.innerFieldRadius / 55);
+  }
+  if (ui.minimapTrackLabel) {
+    ui.minimapTrackLabel.textContent = track.label;
+  }
+}
+
 function createSaveSystem() {
   return {
     records: {
       bestLap: null,
       bestTotal: null,
+      history: [],
     },
     latestFlags: {
       bestLap: false,
@@ -584,6 +728,11 @@ function createSaveSystem() {
         }
         if (typeof parsed.bestTotal === "number") {
           this.records.bestTotal = parsed.bestTotal;
+        }
+        if (Array.isArray(parsed.history)) {
+          this.records.history = parsed.history
+            .filter((entry) => typeof entry.totalTime === "number")
+            .slice(0, CONFIG.save.leaderboardLimit);
         }
       } catch {
         // 本地存档失败时保持静默回退，避免影响比赛主流程。
@@ -615,11 +764,27 @@ function createSaveSystem() {
         this.latestFlags.bestTotal = true;
       }
 
+      this.records.history.unshift({
+        totalTime: player.finishTime,
+        bestLap: fastestLap,
+        rank: player.rank,
+        trackId: gameState.selectedTrackId,
+        trackLabel: gameState.trackConfig?.label ?? "霓虹环线",
+        difficultyId: gameState.selectedDifficultyId,
+        difficultyLabel: gameState.difficultyConfig?.label ?? "进阶",
+        weatherLabel: gameState.weatherConfig?.label ?? "白天",
+        createdAt: new Date().toISOString(),
+      });
+      this.records.history.sort((left, right) => left.totalTime - right.totalTime);
+      this.records.history = this.records.history.slice(0, CONFIG.save.leaderboardLimit);
+
       try {
         window.localStorage.setItem(CONFIG.save.storageKey, JSON.stringify(this.records));
       } catch {
         // 本地存储不可用时，不阻断结算展示。
       }
+
+      this.renderBoards();
     },
     getBestLapLabel() {
       return this.records.bestLap === null ? "暂无" : formatTime(this.records.bestLap);
@@ -636,6 +801,55 @@ function createSaveSystem() {
         labels.push("最佳总成绩新纪录");
       }
       return labels.length > 0 ? `新纪录：${labels.join(" / ")}` : "";
+    },
+    renderBoards() {
+      if (ui.startBestTotal) {
+        ui.startBestTotal.textContent = `最佳总成绩：${this.getBestTotalLabel()}`;
+      }
+      if (ui.startBestLap) {
+        ui.startBestLap.textContent = `最快单圈：${this.getBestLapLabel()}`;
+      }
+
+      const renderList = (listNode) => {
+        if (!listNode) {
+          return;
+        }
+
+        listNode.innerHTML = "";
+        if (this.records.history.length === 0) {
+          const item = document.createElement("li");
+          item.className = "mini-leaderboard-item";
+          item.textContent = "暂无历史记录";
+          listNode.appendChild(item);
+          return;
+        }
+
+        this.records.history.slice(0, 5).forEach((entry, index) => {
+          const item = document.createElement("li");
+          item.className = "mini-leaderboard-item";
+
+          const left = document.createElement("div");
+          left.className = "mini-leaderboard-main";
+
+          const title = document.createElement("strong");
+          title.textContent = `#${index + 1} ${formatTime(entry.totalTime)}`;
+
+          const meta = document.createElement("span");
+          meta.textContent = `${entry.trackLabel} · ${entry.difficultyLabel} · ${entry.weatherLabel}`;
+
+          left.append(title, meta);
+
+          const tag = document.createElement("span");
+          tag.className = "mini-leaderboard-tag";
+          tag.textContent = entry.bestLap ? `单圈 ${formatTime(entry.bestLap)}` : "无单圈";
+
+          item.append(left, tag);
+          listNode.appendChild(item);
+        });
+      };
+
+      renderList(ui.startLeaderboardList);
+      renderList(ui.historyList);
     },
   };
 }
@@ -672,11 +886,218 @@ function createWeatherSystem() {
   };
 }
 
+function createMiniMapSystem() {
+  return {
+    canvas: null,
+    ctx: null,
+    bounds: null,
+    init() {
+      this.canvas = ui.minimapCanvas;
+      this.ctx = this.canvas?.getContext("2d") ?? null;
+      if (gameState.track) {
+        this.setTrack(gameState.track);
+      }
+    },
+    setTrack(track) {
+      if (!track || !this.ctx) {
+        return;
+      }
+
+      const bounds = new THREE.Box3();
+      const boundaryPoints = [...(track.outerPoints ?? []), ...(track.innerPoints ?? []), ...track.points];
+      for (const point of boundaryPoints) {
+        bounds.expandByPoint(point);
+      }
+      this.bounds = bounds;
+      this.render();
+    },
+    projectPoint(point) {
+      if (!this.canvas || !this.bounds) {
+        return { x: 0, y: 0 };
+      }
+
+      const padding = 18;
+      const width = this.canvas.width - padding * 2;
+      const height = this.canvas.height - padding * 2;
+      const spanX = Math.max(1, this.bounds.max.x - this.bounds.min.x);
+      const spanZ = Math.max(1, this.bounds.max.z - this.bounds.min.z);
+      const scale = Math.min(width / spanX, height / spanZ);
+      const offsetX = (this.canvas.width - spanX * scale) * 0.5;
+      const offsetY = (this.canvas.height - spanZ * scale) * 0.5;
+
+      return {
+        x: offsetX + (point.x - this.bounds.min.x) * scale,
+        y: this.canvas.height - (offsetY + (point.z - this.bounds.min.z) * scale),
+      };
+    },
+    render() {
+      if (!this.ctx || !gameState.track) {
+        return;
+      }
+
+      const ctx = this.ctx;
+      const canvas = this.canvas;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "rgba(8, 16, 28, 0.76)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const drawLoop = (points) => {
+        points.forEach((point, index) => {
+          const mapPoint = this.projectPoint(point);
+          if (index === 0) {
+            ctx.moveTo(mapPoint.x, mapPoint.y);
+          } else {
+            ctx.lineTo(mapPoint.x, mapPoint.y);
+          }
+        });
+        ctx.closePath();
+      };
+
+      ctx.beginPath();
+      drawLoop(gameState.track.outerPoints ?? gameState.track.points);
+      drawLoop(gameState.track.innerPoints ?? gameState.track.points);
+      ctx.fillStyle = "rgba(74, 84, 104, 0.42)";
+      ctx.fill("evenodd");
+
+      ctx.beginPath();
+      drawLoop(gameState.track.outerPoints ?? gameState.track.points);
+      ctx.strokeStyle = "rgba(121, 216, 255, 0.88)";
+      ctx.lineWidth = 3;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.stroke();
+
+      ctx.beginPath();
+      drawLoop(gameState.track.innerPoints ?? gameState.track.points);
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.84)";
+      ctx.lineWidth = 2.5;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.stroke();
+
+      const drawCarDot = (car, color, radius) => {
+        if (!car || car.finished) {
+          return;
+        }
+        const point = this.projectPoint(car.mesh.position);
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.strokeStyle = "rgba(6, 11, 19, 0.9)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      };
+
+      for (const car of gameState.aiCars) {
+        drawCarDot(car, "rgba(255, 177, 104, 0.95)", 4);
+      }
+      drawCarDot(gameState.player, "rgba(94, 231, 255, 1)", 5.5);
+    },
+  };
+}
+
+function createSoundSystem() {
+  return {
+    context: null,
+    masterGain: null,
+    engineOscillator: null,
+    engineGain: null,
+    driftGain: null,
+    driftFilter: null,
+    driftSource: null,
+    collisionCooldown: 0,
+    initialized: false,
+    init() {
+      if (this.initialized) {
+        this.context?.resume();
+        return;
+      }
+
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) {
+        return;
+      }
+
+      this.context = new AudioContextClass();
+      this.masterGain = this.context.createGain();
+      this.masterGain.gain.value = CONFIG.audio.masterVolume;
+      this.masterGain.connect(this.context.destination);
+
+      this.engineOscillator = this.context.createOscillator();
+      this.engineOscillator.type = "sawtooth";
+      this.engineGain = this.context.createGain();
+      this.engineGain.gain.value = 0.0001;
+      this.engineOscillator.connect(this.engineGain);
+      this.engineGain.connect(this.masterGain);
+      this.engineOscillator.start();
+
+      this.driftFilter = this.context.createBiquadFilter();
+      this.driftFilter.type = "bandpass";
+      this.driftFilter.frequency.value = 1200;
+      this.driftFilter.Q.value = 0.6;
+      this.driftGain = this.context.createGain();
+      this.driftGain.gain.value = 0.0001;
+      this.driftSource = this.context.createBufferSource();
+      this.driftSource.buffer = createNoiseBuffer(this.context, 1.5);
+      this.driftSource.loop = true;
+      this.driftSource.connect(this.driftFilter);
+      this.driftFilter.connect(this.driftGain);
+      this.driftGain.connect(this.masterGain);
+      this.driftSource.start();
+
+      this.initialized = true;
+      this.context.resume();
+    },
+    update(dt) {
+      if (!this.context || !this.initialized) {
+        return;
+      }
+
+      this.collisionCooldown = Math.max(0, this.collisionCooldown - dt);
+
+      const player = gameState.player;
+      const now = this.context.currentTime;
+      const speedRatio = player ? clamp(Math.abs(getForwardSpeed(player)) / CONFIG.playerPhysics.maxSpeed, 0, 1.2) : 0;
+      const engineTarget = gameState.status === "running" ? 48 + speedRatio * 92 : 38;
+      const engineGainTarget = gameState.status === "running" ? 0.018 + speedRatio * 0.06 : 0.0001;
+      this.engineOscillator.frequency.setTargetAtTime(engineTarget, now, 0.08);
+      this.engineGain.gain.setTargetAtTime(engineGainTarget, now, 0.08);
+
+      const drifting = player?.wasDrifting && gameState.status === "running";
+      const driftGainTarget = drifting ? 0.028 + speedRatio * 0.04 : 0.0001;
+      this.driftFilter.frequency.setTargetAtTime(1000 + speedRatio * 900, now, 0.08);
+      this.driftGain.gain.setTargetAtTime(driftGainTarget, now, 0.06);
+    },
+    playCollision(intensity) {
+      if (!this.context || !this.initialized || this.collisionCooldown > 0) {
+        return;
+      }
+
+      this.collisionCooldown = CONFIG.audio.collisionCooldown;
+      const now = this.context.currentTime;
+      const gain = this.context.createGain();
+      const osc = this.context.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(170 + intensity * 16, now);
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.exponentialRampToValueAtTime(0.085, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 0.18);
+    },
+  };
+}
+
 function createGhostSystem() {
   return {
     ghostCar: null,
     recordedFrames: [],
     lastRunFrames: [],
+    lastRunTrackId: null,
     playbackFrames: [],
     lastRecordedAt: 0,
     playbackTime: 0,
@@ -690,7 +1111,8 @@ function createGhostSystem() {
       this.recordedFrames = [];
       this.lastRecordedAt = 0;
       this.playbackTime = 0;
-      this.playbackFrames = this.lastRunFrames;
+      this.playbackFrames =
+        this.lastRunTrackId === gameState.selectedTrackId ? this.lastRunFrames : [];
       this.ghostCar.mesh.visible = false;
 
       if (this.playbackFrames.length > 1) {
@@ -769,6 +1191,7 @@ function createGhostSystem() {
         yaw: player.yaw,
       });
       this.lastRunFrames = this.recordedFrames.map((frame) => ({ ...frame }));
+      this.lastRunTrackId = gameState.selectedTrackId;
       this.ghostCar.mesh.visible = false;
     },
     applyFrame(frame) {
@@ -787,6 +1210,8 @@ function createItemSystem() {
     boxes: [],
     boxGroup: null,
     shockwaves: [],
+    missiles: [],
+    mines: [],
     init() {
       this.boxGroup = new THREE.Group();
       gameState.scene.add(this.boxGroup);
@@ -796,10 +1221,13 @@ function createItemSystem() {
       this.boxGroup.clear();
       this.boxes = [];
       this.shockwaves = [];
+      this.missiles = [];
+      this.mines = [];
+      const pickupPoints = gameState.trackConfig?.pickupPoints ?? CONFIG.items.pickupPoints;
 
-      for (let index = 0; index < CONFIG.items.pickupPoints; index += 1) {
+      for (let index = 0; index < pickupPoints; index += 1) {
         const progress =
-          ((index + 0.5) / CONFIG.items.pickupPoints) * gameState.track.totalLength;
+          ((index + 0.5) / pickupPoints) * gameState.track.totalLength;
         const frame = getFrameAtProgress(gameState.track, progress);
         const mesh = this.createBoxMesh(index);
         mesh.position.copy(frame.position);
@@ -832,6 +1260,16 @@ function createItemSystem() {
         effect.life = 0;
         effect.mesh.visible = false;
       }
+
+      for (const missile of this.missiles) {
+        missile.life = 0;
+        missile.mesh.visible = false;
+      }
+
+      for (const mine of this.mines) {
+        mine.life = 0;
+        mine.mesh.visible = false;
+      }
     },
     update(dt) {
       for (const car of gameState.cars) {
@@ -863,6 +1301,9 @@ function createItemSystem() {
         effect.mesh.scale.setScalar(1 + progress * 5.4);
         effect.mesh.material.opacity = (1 - progress) * 0.5;
       }
+
+      this.updateMissiles(dt);
+      this.updateMines(dt);
     },
     handlePickups() {
       for (const box of this.boxes) {
@@ -879,7 +1320,7 @@ function createItemSystem() {
             continue;
           }
 
-          car.currentItem = Math.random() < 0.5 ? "boost" : "shockwave";
+          car.currentItem = sampleArray(CONFIG.items.itemPool);
           box.active = false;
           box.mesh.visible = false;
           box.respawnTimer = CONFIG.items.boxRespawnSeconds;
@@ -900,6 +1341,27 @@ function createItemSystem() {
         if (car.currentItem === "boost") {
           const onStraight = Math.abs(car.steering) < 1.2;
           if (onStraight && getForwardSpeed(car) > 16) {
+            this.useItem(car);
+          }
+          continue;
+        }
+
+        if (car.currentItem === "missile") {
+          if (this.findMissileTarget(car)) {
+            this.useItem(car);
+          }
+          continue;
+        }
+
+        if (car.currentItem === "mine") {
+          const hasThreatBehind = gameState.cars.some((target) => {
+            if (target === car || target.finished) {
+              return false;
+            }
+            const gap = getRankingProgress(car) - getRankingProgress(target);
+            return gap > 3 && gap < 26;
+          });
+          if (hasThreatBehind) {
             this.useItem(car);
           }
           continue;
@@ -926,9 +1388,9 @@ function createItemSystem() {
       }
 
       const itemType = car.currentItem;
-      car.currentItem = null;
 
       if (itemType === "boost") {
+        car.currentItem = null;
         car.itemBoostTimer = Math.max(car.itemBoostTimer, CONFIG.items.boostDuration);
         if (car.type === "player") {
           setNotice("道具加速已触发", 1);
@@ -937,14 +1399,169 @@ function createItemSystem() {
       }
 
       if (itemType === "shockwave") {
+        car.currentItem = null;
         this.triggerShockwave(car);
         if (car.type === "player") {
-          setNotice("冲击波已释放", 1);
+          setNotice("范围冲击波已释放", 1);
+        }
+        return true;
+      }
+
+      if (itemType === "mine") {
+        car.currentItem = null;
+        this.deployMine(car);
+        if (car.type === "player") {
+          setNotice("地雷已布设", 1);
+        }
+        return true;
+      }
+
+      if (itemType === "missile") {
+        const target = this.findMissileTarget(car);
+        if (!target) {
+          if (car.type === "player") {
+            setNotice("前方没有可锁定目标", 1);
+          }
+          return false;
+        }
+        car.currentItem = null;
+        this.launchMissile(car, target);
+        if (car.type === "player") {
+          setNotice(`导弹已锁定：${target.label}`, 1);
         }
         return true;
       }
 
       return false;
+    },
+    findMissileTarget(sourceCar) {
+      let bestTarget = null;
+      let bestGap = Infinity;
+
+      for (const target of gameState.cars) {
+        if (target === sourceCar || target.finished) {
+          continue;
+        }
+
+        const progressGap = getRankingProgress(target) - getRankingProgress(sourceCar);
+        if (progressGap <= 2 || progressGap > 90) {
+          continue;
+        }
+
+        if (progressGap < bestGap) {
+          bestGap = progressGap;
+          bestTarget = target;
+        }
+      }
+
+      return bestTarget;
+    },
+    launchMissile(sourceCar, target) {
+      const missile = this.obtainMissile();
+      const forward = getForwardVector(sourceCar.yaw).clone();
+      missile.owner = sourceCar;
+      missile.target = target;
+      missile.direction.copy(forward);
+      missile.life = CONFIG.items.missileLifeSeconds;
+      missile.mesh.position.copy(sourceCar.mesh.position).addScaledVector(forward, 2.4);
+      missile.mesh.position.y = 0.9;
+      missile.mesh.visible = true;
+      missile.mesh.lookAt(missile.mesh.position.clone().add(forward));
+    },
+    updateMissiles(dt) {
+      for (const missile of this.missiles) {
+        if (missile.life <= 0 || !missile.mesh.visible) {
+          continue;
+        }
+
+        missile.life = Math.max(0, missile.life - dt);
+        const target = missile.target;
+        if (!target || target.finished) {
+          missile.life = 0;
+          missile.mesh.visible = false;
+          continue;
+        }
+
+        const desired = target.mesh.position.clone().sub(missile.mesh.position);
+        desired.y = 0;
+        const distance = desired.length();
+        if (distance < CONFIG.items.missileHitRadius) {
+          this.triggerMissileHit(missile, target);
+          continue;
+        }
+
+        desired.normalize();
+        missile.direction.lerp(desired, 1 - Math.exp(-CONFIG.items.missileTurnRate * dt)).normalize();
+        missile.mesh.position.addScaledVector(missile.direction, CONFIG.items.missileSpeed * dt);
+        missile.mesh.position.y = 0.9;
+        missile.mesh.lookAt(missile.mesh.position.clone().add(missile.direction));
+
+        if (missile.life <= 0) {
+          missile.mesh.visible = false;
+        }
+      }
+    },
+    triggerMissileHit(missile, target) {
+      target.slowTimer = Math.max(target.slowTimer, CONFIG.items.missileSlowSeconds);
+      target.velocity.multiplyScalar(CONFIG.items.missileSpeedDamping);
+      missile.life = 0;
+      missile.mesh.visible = false;
+      this.spawnBurst(target.mesh.position, 0xffb168);
+
+      if (target.type === "player") {
+        setNotice("被导弹命中，车速下降", 1.1);
+      }
+    },
+    deployMine(sourceCar) {
+      const mine = this.obtainMine();
+      mine.owner = sourceCar;
+      mine.life = CONFIG.items.mineLifeSeconds;
+      mine.armTimer = CONFIG.items.mineArmSeconds;
+      mine.mesh.position.copy(sourceCar.mesh.position);
+      mine.mesh.position.y = 0.24;
+      mine.mesh.visible = true;
+    },
+    updateMines(dt) {
+      for (const mine of this.mines) {
+        if (mine.life <= 0 || !mine.mesh.visible) {
+          continue;
+        }
+
+        mine.life = Math.max(0, mine.life - dt);
+        mine.armTimer = Math.max(0, mine.armTimer - dt);
+        mine.mesh.rotation.y += dt * 1.6;
+        mine.mesh.position.y = 0.24 + Math.sin(gameState.elapsedTime * 3 + mine.phase) * 0.05;
+
+        if (mine.life <= 0) {
+          mine.mesh.visible = false;
+          continue;
+        }
+
+        if (mine.armTimer > 0) {
+          continue;
+        }
+
+        for (const car of gameState.cars) {
+          if (car === mine.owner || car.finished) {
+            continue;
+          }
+
+          if (car.mesh.position.distanceTo(mine.mesh.position) > CONFIG.items.mineTriggerRadius) {
+            continue;
+          }
+
+          car.slowTimer = Math.max(car.slowTimer, CONFIG.items.mineSlowSeconds);
+          car.velocity.multiplyScalar(CONFIG.items.mineSpeedDamping);
+          mine.life = 0;
+          mine.mesh.visible = false;
+          this.spawnBurst(mine.mesh.position, 0xff6b74);
+
+          if (car.type === "player") {
+            setNotice("踩中地雷，车速骤降", 1.1);
+          }
+          break;
+        }
+      }
     },
     triggerShockwave(sourceCar) {
       let hitCount = 0;
@@ -978,16 +1595,26 @@ function createItemSystem() {
         setNotice("冲击波已释放，但没有命中目标", 1);
       }
     },
-    obtainShockwaveEffect() {
+    spawnBurst(position, color) {
+      const effect = this.obtainShockwaveEffect(color);
+      effect.mesh.position.copy(position);
+      effect.mesh.position.y = 0.18;
+      effect.mesh.scale.setScalar(1);
+      effect.mesh.visible = true;
+      effect.life = CONFIG.items.shockwaveVisualSeconds;
+    },
+    obtainShockwaveEffect(color = 0x79d8ff) {
       const available = this.shockwaves.find((effect) => effect.life <= 0);
       if (available) {
+        available.mesh.material.color.setHex(color);
+        available.mesh.material.opacity = 0.5;
         return available;
       }
 
       const mesh = new THREE.Mesh(
         new THREE.TorusGeometry(2.2, 0.22, 12, 28),
         new THREE.MeshBasicMaterial({
-          color: 0x79d8ff,
+          color,
           transparent: true,
           opacity: 0.5,
         }),
@@ -998,6 +1625,60 @@ function createItemSystem() {
       const effect = { mesh, life: 0 };
       this.shockwaves.push(effect);
       return effect;
+    },
+    obtainMissile() {
+      const available = this.missiles.find((missile) => missile.life <= 0);
+      if (available) {
+        return available;
+      }
+
+      const group = new THREE.Group();
+      const body = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.12, 0.12, 1.2, 10),
+        new THREE.MeshStandardMaterial({ color: 0xffb168, emissive: 0x4a2310 }),
+      );
+      body.rotation.z = Math.PI / 2;
+      const nose = new THREE.Mesh(
+        new THREE.ConeGeometry(0.22, 0.5, 10),
+        new THREE.MeshStandardMaterial({ color: 0xffe3c0, emissive: 0x5a3620 }),
+      );
+      nose.rotation.z = -Math.PI / 2;
+      nose.position.x = 0.84;
+      group.add(body, nose);
+      group.visible = false;
+      gameState.scene.add(group);
+      const missile = {
+        mesh: group,
+        owner: null,
+        target: null,
+        direction: new THREE.Vector3(0, 0, 1),
+        life: 0,
+      };
+      this.missiles.push(missile);
+      return missile;
+    },
+    obtainMine() {
+      const available = this.mines.find((mine) => mine.life <= 0);
+      if (available) {
+        return available;
+      }
+
+      const group = new THREE.Group();
+      const base = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.65, 0.8, 0.22, 10),
+        new THREE.MeshStandardMaterial({ color: 0x3c4654, roughness: 0.8 }),
+      );
+      const core = new THREE.Mesh(
+        new THREE.SphereGeometry(0.22, 10, 10),
+        new THREE.MeshStandardMaterial({ color: 0xff6b74, emissive: 0x4b161d }),
+      );
+      core.position.y = 0.2;
+      group.add(base, core);
+      group.visible = false;
+      gameState.scene.add(group);
+      const mine = { mesh: group, owner: null, life: 0, armTimer: 0, phase: Math.random() * Math.PI * 2 };
+      this.mines.push(mine);
+      return mine;
     },
     createBoxMesh(index) {
       const group = new THREE.Group();
@@ -1021,8 +1702,14 @@ function createItemSystem() {
       if (itemType === "boost") {
         return "加速道具";
       }
+      if (itemType === "missile") {
+        return "锁定导弹";
+      }
+      if (itemType === "mine") {
+        return "地雷陷阱";
+      }
       if (itemType === "shockwave") {
-        return "冲击波";
+        return "范围冲击波";
       }
       return "无";
     },
@@ -1847,6 +2534,7 @@ function animate() {
   updateGame(dt);
   updateCamera(dt);
   renderHUD();
+  minimapSystem.render();
   gameState.renderer.render(gameState.scene, gameState.camera);
 }
 
@@ -1854,6 +2542,8 @@ function updateGame(dt) {
   if (gameState.noticeTimer > 0) {
     gameState.noticeTimer = Math.max(0, gameState.noticeTimer - dt);
   }
+
+  soundSystem.update(dt);
 
   if (gameState.status === "countdown") {
     updateCountdown(dt);
@@ -2021,6 +2711,9 @@ function resolveCarCollisions() {
 
         const relativeSpeed = rightCar.velocity.clone().sub(leftCar.velocity).dot(normal);
         if (relativeSpeed < 0) {
+          if (Math.abs(relativeSpeed) >= CONFIG.audio.collisionThreshold) {
+            soundSystem.playCollision(Math.abs(relativeSpeed));
+          }
           const impulse = (-(1 + CONFIG.collision.restitution) * relativeSpeed) / 2;
           leftCar.velocity.addScaledVector(normal, -impulse);
           rightCar.velocity.addScaledVector(normal, impulse);
@@ -2176,7 +2869,7 @@ function syncCarToTrack(car) {
 }
 
 function enforceTrackRules(car, dt) {
-  const maxLateral = gameState.track.halfWidth - CONFIG.track.resetMargin;
+  const maxLateral = gameState.track.halfWidth - (gameState.trackConfig?.resetMargin ?? CONFIG.trackDefaults.resetMargin);
   if (Math.abs(car.trackProjection.lateralDistance) > maxLateral && car.resetCooldown <= 0) {
     resetCarToCheckpoint(car, "驶出赛道，已自动复位");
     return;
@@ -2325,8 +3018,13 @@ function renderHUD() {
   ui.boostValue.textContent = boostText;
   ui.difficultyValue.textContent = gameState.difficultyConfig?.label ?? "进阶";
   ui.weatherValue.textContent = gameState.weatherConfig?.label ?? "白天";
+  ui.trackValue.textContent = gameState.trackConfig?.label ?? "霓虹环线";
   ui.statusValue.textContent = statusText;
   ui.statusValue.dataset.tone = getStatusTone(player, boostActive, driftActive);
+  if (ui.hudSupportText) {
+    ui.hudSupportText.textContent =
+      gameState.trackConfig?.supportText ?? "保持稳定路线，尽量减少无效打滑。";
+  }
 
   ui.hud.classList.toggle("is-drifting", driftActive);
   ui.hud.classList.toggle("is-boosting", boostActive);
@@ -2382,11 +3080,12 @@ function showResults() {
   const player = gameState.player;
   ui.resultTitle.textContent = `你获得了第 ${player.rank} 名`;
   ui.resultSummary.textContent =
-    `${gameState.difficultyConfig?.label ?? "进阶"}难度，总用时 ` +
+    `${gameState.trackConfig?.label ?? "霓虹环线"} · ${gameState.difficultyConfig?.label ?? "进阶"}难度 · ${gameState.weatherConfig?.label ?? "白天"}环境，总用时 ` +
     `${formatTime(player.finishTime || gameState.elapsedTime)}，本场共有 ${gameState.cars.length} 辆赛车。`;
   ui.recordBestTotal.textContent = `最佳总成绩：${saveSystem.getBestTotalLabel()}`;
   ui.recordBestLap.textContent = `最快单圈：${saveSystem.getBestLapLabel()}`;
   ui.recordFlags.textContent = saveSystem.getRecordFlagText();
+  saveSystem.renderBoards();
 
   ui.resultList.innerHTML = "";
   for (const car of gameState.results) {
@@ -2485,56 +3184,59 @@ function updateCamera(dt) {
 function createTrack() {
   const trackGroup = new THREE.Group();
   const decorationGroup = new THREE.Group();
-  const halfWidth = CONFIG.track.width / 2;
+  const trackConfig = gameState.trackConfig ?? getSelectedTrackConfig(gameState.selectedTrackId);
+  const halfWidth = trackConfig.width / 2;
   const centerPoints = buildRoundedRectLoop(
-    CONFIG.track.halfX,
-    CONFIG.track.halfZ,
-    CONFIG.track.cornerRadius,
-    CONFIG.track.straightSamples,
-    CONFIG.track.arcSamples,
+    trackConfig.halfX,
+    trackConfig.halfZ,
+    trackConfig.cornerRadius,
+    trackConfig.straightSamples,
+    trackConfig.arcSamples,
   );
   const totalLength = computeTotalLength(centerPoints);
-  const checkpoints = buildCheckpoints(totalLength, CONFIG.track.checkpointCount);
+  const checkpoints = buildCheckpoints(totalLength, trackConfig.checkpointCount);
+  const outerPoints = buildRoundedRectLoop(
+    trackConfig.halfX + halfWidth,
+    trackConfig.halfZ + halfWidth,
+    trackConfig.cornerRadius + halfWidth,
+    trackConfig.straightSamples,
+    trackConfig.arcSamples,
+  );
+  const innerPoints = buildRoundedRectLoop(
+    trackConfig.halfX - halfWidth,
+    trackConfig.halfZ - halfWidth,
+    trackConfig.cornerRadius - halfWidth,
+    trackConfig.straightSamples,
+    trackConfig.arcSamples,
+  ).reverse();
   const trackData = {
     group: trackGroup,
     points: centerPoints,
+    outerPoints,
+    innerPoints,
     totalLength,
     halfWidth,
     checkpoints,
     trackMesh: null,
     decorationGroup,
+    config: trackConfig,
   };
-
-  const outerPoints = buildRoundedRectLoop(
-    CONFIG.track.halfX + halfWidth,
-    CONFIG.track.halfZ + halfWidth,
-    CONFIG.track.cornerRadius + halfWidth,
-    CONFIG.track.straightSamples,
-    CONFIG.track.arcSamples,
-  );
-  const innerPoints = buildRoundedRectLoop(
-    CONFIG.track.halfX - halfWidth,
-    CONFIG.track.halfZ - halfWidth,
-    CONFIG.track.cornerRadius - halfWidth,
-    CONFIG.track.straightSamples,
-    CONFIG.track.arcSamples,
-  ).reverse();
 
   const trackShape = new THREE.Shape(outerPoints.map((point) => new THREE.Vector2(point.x, point.z)));
   trackShape.holes.push(new THREE.Path(innerPoints.map((point) => new THREE.Vector2(point.x, point.z))));
 
   const trackMesh = new THREE.Mesh(
     new THREE.ShapeGeometry(trackShape, 96).rotateX(-Math.PI / 2),
-    new THREE.MeshStandardMaterial({ color: 0x2e333e, roughness: 0.92, metalness: 0.02 }),
+    new THREE.MeshStandardMaterial({ color: trackConfig.trackColor, roughness: 0.92, metalness: 0.02 }),
   );
   trackMesh.position.y = 0.02;
   trackGroup.add(trackMesh);
   trackData.trackMesh = trackMesh;
 
-  addLaneMarkers(trackGroup, centerPoints);
-  addBarriers(trackGroup, centerPoints, halfWidth);
-  addDirectionMarkers(trackGroup, centerPoints, halfWidth);
-  addStartLine(trackGroup, trackData, halfWidth);
+  addLaneMarkers(trackGroup, centerPoints, trackConfig);
+  addBarriers(trackGroup, centerPoints, halfWidth, trackConfig);
+  addDirectionMarkers(trackGroup, centerPoints, halfWidth, trackConfig);
+  addStartLine(trackGroup, trackData, halfWidth, trackConfig);
   trackGroup.add(decorationGroup);
 
   return trackData;
@@ -2613,9 +3315,9 @@ function buildCheckpoints(totalLength, count) {
   return checkpoints;
 }
 
-function addLaneMarkers(group, centerPoints) {
+function addLaneMarkers(group, centerPoints, trackConfig) {
   const markerGeometry = new THREE.BoxGeometry(3.6, 0.12, 0.35);
-  const markerMaterial = new THREE.MeshStandardMaterial({ color: 0xf5f5f5, roughness: 0.8 });
+  const markerMaterial = new THREE.MeshStandardMaterial({ color: trackConfig.laneMarkerColor, roughness: 0.8 });
 
   for (let index = 0; index < centerPoints.length; index += 8) {
     const next = centerPoints[(index + 1) % centerPoints.length];
@@ -2632,11 +3334,11 @@ function addLaneMarkers(group, centerPoints) {
   }
 }
 
-function addBarriers(group, centerPoints, halfWidth) {
-  const barrierGeometry = new THREE.BoxGeometry(4.2, CONFIG.track.wallHeight, 1.1);
+function addBarriers(group, centerPoints, halfWidth, trackConfig) {
+  const barrierGeometry = new THREE.BoxGeometry(4.2, trackConfig.wallHeight, 1.1);
   const materials = [
-    new THREE.MeshStandardMaterial({ color: 0xe7e7e7, roughness: 0.7 }),
-    new THREE.MeshStandardMaterial({ color: 0xff5c62, roughness: 0.7 }),
+    new THREE.MeshStandardMaterial({ color: trackConfig.barrierColors[0], roughness: 0.7 }),
+    new THREE.MeshStandardMaterial({ color: trackConfig.barrierColors[1], roughness: 0.7 }),
   ];
 
   for (let index = 0; index < centerPoints.length; index += 3) {
@@ -2655,15 +3357,15 @@ function addBarriers(group, centerPoints, halfWidth) {
       );
       barrier.scale.x = Math.max(0.8, length / 4.2);
       barrier.position.copy(midpoint).addScaledVector(normal, sign * halfWidth);
-      barrier.position.y = CONFIG.track.wallHeight / 2;
+      barrier.position.y = trackConfig.wallHeight / 2;
       barrier.rotation.y = Math.atan2(tangent.z, tangent.x);
       group.add(barrier);
     }
   }
 }
 
-function addDirectionMarkers(group, centerPoints, halfWidth) {
-  const markerMaterial = new THREE.MeshStandardMaterial({ color: 0xffce56, roughness: 0.6 });
+function addDirectionMarkers(group, centerPoints, halfWidth, trackConfig) {
+  const markerMaterial = new THREE.MeshStandardMaterial({ color: trackConfig.directionMarkerColor, roughness: 0.6 });
   const markerGeometry = new THREE.ConeGeometry(1, 2.4, 4);
 
   for (let index = 0; index < centerPoints.length; index += 28) {
@@ -2680,7 +3382,7 @@ function addDirectionMarkers(group, centerPoints, halfWidth) {
   }
 }
 
-function addStartLine(group, track, halfWidth) {
+function addStartLine(group, track, halfWidth, trackConfig) {
   const startFrame = getFrameAtProgress(track, 0);
 
   for (let index = -3; index <= 3; index += 1) {
@@ -2699,7 +3401,7 @@ function addStartLine(group, track, halfWidth) {
 
   const arch = new THREE.Mesh(
     new THREE.BoxGeometry(halfWidth * 2 + 4, 0.6, 0.8),
-    new THREE.MeshStandardMaterial({ color: 0x79d8ff, emissive: 0x15354d }),
+    new THREE.MeshStandardMaterial({ color: trackConfig.startArchColor, emissive: trackConfig.startArchEmissive }),
   );
   arch.position.copy(startFrame.position);
   arch.position.y = 3.6;
@@ -2710,7 +3412,7 @@ function addStartLine(group, track, halfWidth) {
 function buildSpawnSetups(totalCars) {
   const laneOffsets = [0, -4.6, 4.6, -7.4, 7.4];
   const rowSpacing = 7.2;
-  const frontProgress = CONFIG.track.startProgress + 10;
+  const frontProgress = (gameState.trackConfig?.startProgress ?? CONFIG.trackDefaults.startProgress) + 10;
   const setups = [];
 
   for (let index = 0; index < totalCars; index += 1) {
@@ -3163,6 +3865,7 @@ function handleResize() {
   gameState.camera.aspect = window.innerWidth / window.innerHeight;
   gameState.camera.updateProjectionMatrix();
   gameState.renderer.setSize(window.innerWidth, window.innerHeight);
+  minimapSystem.render();
 }
 
 function formatTime(seconds) {
@@ -3200,6 +3903,23 @@ function lerp(start, end, t) {
 function stableNoise(seed) {
   const raw = Math.sin(seed * 12.9898) * 43758.5453123;
   return raw - Math.floor(raw);
+}
+
+function sampleArray(values) {
+  if (!Array.isArray(values) || values.length === 0) {
+    return null;
+  }
+  return values[Math.floor(Math.random() * values.length)];
+}
+
+function createNoiseBuffer(context, seconds) {
+  const length = Math.max(1, Math.floor(context.sampleRate * seconds));
+  const buffer = context.createBuffer(1, length, context.sampleRate);
+  const channel = buffer.getChannelData(0);
+  for (let index = 0; index < length; index += 1) {
+    channel[index] = Math.random() * 2 - 1;
+  }
+  return buffer;
 }
 
 function mod(value, base) {

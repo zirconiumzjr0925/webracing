@@ -35,7 +35,7 @@
           <p>必须按顺序通过检查点，才能完成有效计圈。</p>
           <p>冲出赛道或长时间逆行会自动复位到最近检查点。</p>
           <p>连续漂移可积累增压，松开手刹会自动释放。</p>
-          <p>道具盒会提供加速道具或冲击波道具。</p>
+          <p>道具盒会提供加速、导弹、地雷和范围冲击波。</p>
         </div>
       </div>
       <div class="difficulty-section">
@@ -62,6 +62,24 @@
       </div>
       <div class="difficulty-section">
         <div class="difficulty-header">
+          <h2>选择赛道</h2>
+          <p id="track-description" class="difficulty-description">
+            霓虹环线：高速直道更多，适合连续漂移后接增压冲刺。
+          </p>
+        </div>
+        <div class="difficulty-options">
+          <button class="track-option difficulty-option active" type="button" data-track="speedway">
+            <strong>霓虹环线</strong>
+            <span>节奏更快，适合以速度和道具压制对手</span>
+          </button>
+          <button class="track-option difficulty-option" type="button" data-track="canyon">
+            <strong>赤岩峡谷</strong>
+            <span>连续弯更多，适合控车和埋伏地雷反制</span>
+          </button>
+        </div>
+      </div>
+      <div class="difficulty-section">
+        <div class="difficulty-header">
           <h2>选择环境</h2>
           <p id="weather-description" class="difficulty-description">
             白天：视野明亮，赛道边界最清晰。
@@ -80,6 +98,14 @@
             <strong>夜晚</strong>
             <span>更暗的环境，更考验路线感</span>
           </button>
+        </div>
+      </div>
+      <div class="record-board start-record-board">
+        <p id="start-best-total" class="record-line">最佳总成绩：暂无</p>
+        <p id="start-best-lap" class="record-line">最快单圈：暂无</p>
+        <div class="mini-leaderboard-section">
+          <h3>本地排行榜</h3>
+          <ul id="start-leaderboard-list" class="mini-leaderboard-list"></ul>
         </div>
       </div>
       <button id="start-button" class="primary-button" type="button">开始游戏</button>
@@ -108,6 +134,10 @@
         </div>
       </div>
       <div class="hud-chip-row">
+        <span class="hud-chip">
+          赛道
+          <strong id="track-value">霓虹环线</strong>
+        </span>
         <span class="hud-chip">
           环境
           <strong id="weather-value">白天</strong>
@@ -151,6 +181,20 @@
         </div>
       </div>
     </div>
+
+    <div id="minimap-panel" class="hud-card minimap-panel">
+      <div class="hud-card-head">
+        <span class="hud-section-label">小地图</span>
+        <strong id="minimap-track-label" class="hud-status-pill" data-tone="neutral">霓虹环线</strong>
+      </div>
+      <canvas
+        id="minimap-canvas"
+        class="minimap-canvas"
+        width="220"
+        height="220"
+        aria-label="赛道小地图"
+      ></canvas>
+    </div>
   </div>
 
   <div id="result-screen" class="overlay hidden">
@@ -172,6 +216,10 @@
           <h3>玩家分段</h3>
           <ul id="lap-time-list" class="lap-time-list"></ul>
         </div>
+      </div>
+      <div class="record-board history-board">
+        <h3>本地排行榜</h3>
+        <ul id="history-list" class="mini-leaderboard-list"></ul>
       </div>
       <button id="restart-button" class="primary-button" type="button">重新开始</button>
     </div>
