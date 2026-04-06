@@ -21,6 +21,7 @@
           <h2>基础操作</h2>
           <p>`WASD` / 方向键：加速、刹车、转向</p>
           <p>`Space`：漂移 / 手刹</p>
+          <p>`F`：使用当前道具</p>
           <p>`C`：切换镜头</p>
           <p>`R`：手动复位</p>
         </div>
@@ -29,6 +30,7 @@
           <p>必须按顺序通过检查点，才能完成有效计圈。</p>
           <p>冲出赛道或长时间逆行会自动复位到最近检查点。</p>
           <p>连续漂移可积累增压，松开手刹会自动释放。</p>
+          <p>道具盒会提供加速道具或冲击波道具。</p>
         </div>
       </div>
       <div class="difficulty-section">
@@ -50,6 +52,28 @@
           <button class="difficulty-option" type="button" data-difficulty="legend">
             <strong>极限</strong>
             <span>7 名 AI，前排速度明显更快</span>
+          </button>
+        </div>
+      </div>
+      <div class="difficulty-section">
+        <div class="difficulty-header">
+          <h2>选择环境</h2>
+          <p id="weather-description" class="difficulty-description">
+            白天：视野明亮，赛道边界最清晰。
+          </p>
+        </div>
+        <div class="difficulty-options">
+          <button class="weather-option difficulty-option active" type="button" data-weather="day">
+            <strong>白天</strong>
+            <span>明亮通透，适合稳定发挥</span>
+          </button>
+          <button class="weather-option difficulty-option" type="button" data-weather="dusk">
+            <strong>黄昏</strong>
+            <span>暖色光照，氛围更强烈</span>
+          </button>
+          <button class="weather-option difficulty-option" type="button" data-weather="night">
+            <strong>夜晚</strong>
+            <span>更暗的环境，更考验路线感</span>
           </button>
         </div>
       </div>
@@ -85,12 +109,20 @@
         <strong id="camera-value">追尾镜头</strong>
       </div>
       <div class="hud-row">
+        <span>当前道具</span>
+        <strong id="item-value">无</strong>
+      </div>
+      <div class="hud-row">
         <span>漂移增压</span>
         <strong id="boost-value">未蓄能</strong>
       </div>
       <div class="hud-row">
         <span>难度</span>
         <strong id="difficulty-value">进阶</strong>
+      </div>
+      <div class="hud-row">
+        <span>环境</span>
+        <strong id="weather-value">白天</strong>
       </div>
       <div class="hud-row">
         <span>比赛状态</span>
@@ -104,6 +136,11 @@
       <p class="eyebrow">比赛结束</p>
       <h2 id="result-title">最终成绩</h2>
       <p id="result-summary" class="summary-line"></p>
+      <div class="record-board">
+        <p id="record-best-total" class="record-line">最佳总成绩：暂无</p>
+        <p id="record-best-lap" class="record-line">最快单圈：暂无</p>
+        <p id="record-flags" class="record-line record-line-highlight"></p>
+      </div>
       <div class="results-columns">
         <div>
           <h3>最终排名</h3>
@@ -116,6 +153,34 @@
       </div>
       <button id="restart-button" class="primary-button" type="button">重新开始</button>
     </div>
+  </div>
+
+  <button id="debug-toggle" class="debug-toggle" type="button">开发调试</button>
+  <div id="debug-panel" class="debug-panel hidden">
+    <div class="debug-panel-header">
+      <h3>开发调试面板</h3>
+      <p>调整后立即作用于玩家车辆。</p>
+    </div>
+    <label class="debug-control" for="debug-max-speed">
+      <span>最高速度</span>
+      <strong id="debug-max-speed-value">45</strong>
+      <input id="debug-max-speed" type="range" min="28" max="70" step="1" />
+    </label>
+    <label class="debug-control" for="debug-acceleration">
+      <span>加速度</span>
+      <strong id="debug-acceleration-value">34</strong>
+      <input id="debug-acceleration" type="range" min="18" max="60" step="1" />
+    </label>
+    <label class="debug-control" for="debug-grip">
+      <span>抓地力</span>
+      <strong id="debug-grip-value">10.2</strong>
+      <input id="debug-grip" type="range" min="4" max="16" step="0.1" />
+    </label>
+    <label class="debug-control" for="debug-drift-factor">
+      <span>漂移系数</span>
+      <strong id="debug-drift-factor-value">12.5</strong>
+      <input id="debug-drift-factor" type="range" min="6" max="22" step="0.1" />
+    </label>
   </div>
 
   <script type="module" src="./game.js"></script>

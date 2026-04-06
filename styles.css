@@ -289,9 +289,88 @@ h3 {
   line-height: 1.8;
 }
 
+.record-board {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.record-line {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.record-line:first-child {
+  margin-top: 0;
+}
+
+.record-line-highlight {
+  color: var(--accent-strong);
+  font-weight: 700;
+  min-height: 1.4em;
+}
+
 .result-list li::marker,
 .lap-time-list li::marker {
   color: var(--accent-strong);
+}
+
+.debug-toggle {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  z-index: 40;
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(8, 12, 18, 0.82);
+  color: var(--text);
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 14px 24px rgba(0, 0, 0, 0.24);
+}
+
+.debug-panel {
+  position: absolute;
+  left: 20px;
+  bottom: 20px;
+  z-index: 40;
+  width: min(320px, calc(100vw - 40px));
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(8, 12, 18, 0.9);
+  box-shadow: 0 22px 36px rgba(0, 0, 0, 0.28);
+}
+
+.debug-panel-header p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.debug-control {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 12px;
+  margin-top: 14px;
+  color: var(--muted);
+}
+
+.debug-control span,
+.debug-control strong {
+  align-self: center;
+}
+
+.debug-control strong {
+  color: var(--text);
+}
+
+.debug-control input {
+  grid-column: 1 / -1;
+  width: 100%;
 }
 
 @media (max-width: 720px) {
@@ -311,5 +390,16 @@ h3 {
   .hud-panel-right {
     position: static;
     min-width: 0;
+  }
+
+  .debug-panel {
+    left: 14px;
+    bottom: 64px;
+    width: calc(100vw - 28px);
+  }
+
+  .debug-toggle {
+    right: 14px;
+    bottom: 14px;
   }
 }

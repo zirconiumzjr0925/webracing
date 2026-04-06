@@ -11,6 +11,26 @@ const CONFIG = {
     speedDamping: 0.985,
     iterations: 2,
   },
+  items: {
+    pickupRadius: 3.3,
+    boxRespawnSeconds: 6.5,
+    bobAmplitude: 0.38,
+    spinSpeed: 2.2,
+    boostDuration: 2.2,
+    boostAcceleration: 34,
+    boostTopSpeedBonus: 18,
+    shockwaveRadius: 16,
+    shockwaveSlowFactor: 0.58,
+    shockwaveSlowSeconds: 1.85,
+    shockwaveVisualSeconds: 0.65,
+    pickupPoints: 8,
+  },
+  ghost: {
+    sampleInterval: 1 / 30,
+  },
+  save: {
+    storageKey: "neon-bend-rush-save-v1",
+  },
   track: {
     halfX: 68,
     halfZ: 44,
@@ -111,6 +131,56 @@ const CONFIG = {
     player: "玩家",
     ai: ["赤焰", "苍穹", "雷霆", "飓风", "影袭", "彗星", "裂空", "霜刃", "钢牙"],
   },
+  weatherPresets: {
+    day: {
+      label: "白天",
+      description: "白天：视野明亮，赛道边界最清晰。",
+      background: 0x87bfe6,
+      fogNear: 110,
+      fogFar: 300,
+      ambientSky: 0xd9f4ff,
+      ambientGround: 0x234018,
+      ambientIntensity: 1.35,
+      sunColor: 0xffffff,
+      sunIntensity: 1.1,
+      sunPosition: [70, 85, 40],
+      groundColor: 0x3d8150,
+      innerFieldColor: 0x4d9c56,
+      trackColor: 0x2e333e,
+    },
+    dusk: {
+      label: "黄昏",
+      description: "黄昏：暖色光照，弯道更有压迫感。",
+      background: 0xd68f6c,
+      fogNear: 95,
+      fogFar: 250,
+      ambientSky: 0xffd6bb,
+      ambientGround: 0x4a2618,
+      ambientIntensity: 1.05,
+      sunColor: 0xffc389,
+      sunIntensity: 0.9,
+      sunPosition: [55, 45, 18],
+      groundColor: 0x5b6140,
+      innerFieldColor: 0x59693d,
+      trackColor: 0x38323a,
+    },
+    night: {
+      label: "夜晚",
+      description: "夜晚：环境更暗，需要更依赖路线记忆与车感。",
+      background: 0x08111f,
+      fogNear: 75,
+      fogFar: 200,
+      ambientSky: 0x375272,
+      ambientGround: 0x081018,
+      ambientIntensity: 0.58,
+      sunColor: 0x9ac7ff,
+      sunIntensity: 0.36,
+      sunPosition: [28, 50, 12],
+      groundColor: 0x152131,
+      innerFieldColor: 0x1b3130,
+      trackColor: 0x1c232e,
+    },
+  },
   difficulties: {
     casual: {
       label: "休闲",
@@ -167,29 +237,49 @@ const ui = {
   speedValue: document.getElementById("speed-value"),
   timeValue: document.getElementById("time-value"),
   cameraValue: document.getElementById("camera-value"),
+  itemValue: document.getElementById("item-value"),
   boostValue: document.getElementById("boost-value"),
   difficultyValue: document.getElementById("difficulty-value"),
+  weatherValue: document.getElementById("weather-value"),
   statusValue: document.getElementById("status-value"),
   difficultyDescription: document.getElementById("difficulty-description"),
-  difficultyButtons: [...document.querySelectorAll(".difficulty-option")],
+  difficultyButtons: [...document.querySelectorAll("[data-difficulty]")],
+  weatherDescription: document.getElementById("weather-description"),
+  weatherButtons: [...document.querySelectorAll("[data-weather]")],
   resultScreen: document.getElementById("result-screen"),
   resultTitle: document.getElementById("result-title"),
   resultSummary: document.getElementById("result-summary"),
   resultList: document.getElementById("result-list"),
   lapTimeList: document.getElementById("lap-time-list"),
+  recordBestTotal: document.getElementById("record-best-total"),
+  recordBestLap: document.getElementById("record-best-lap"),
+  recordFlags: document.getElementById("record-flags"),
   restartButton: document.getElementById("restart-button"),
+  debugToggle: document.getElementById("debug-toggle"),
+  debugPanel: document.getElementById("debug-panel"),
+  debugMaxSpeed: document.getElementById("debug-max-speed"),
+  debugMaxSpeedValue: document.getElementById("debug-max-speed-value"),
+  debugAcceleration: document.getElementById("debug-acceleration"),
+  debugAccelerationValue: document.getElementById("debug-acceleration-value"),
+  debugGrip: document.getElementById("debug-grip"),
+  debugGripValue: document.getElementById("debug-grip-value"),
+  debugDriftFactor: document.getElementById("debug-drift-factor"),
+  debugDriftFactorValue: document.getElementById("debug-drift-factor-value"),
 };
 
 const gameState = {
   scene: null,
   camera: null,
   renderer: null,
+  ambientLight: null,
+  sunLight: null,
   clock: new THREE.Clock(),
   cameraLookTarget: new THREE.Vector3(),
   status: "start",
   countdownRemaining: 0,
   elapsedTime: 0,
   track: null,
+  world: {},
   player: null,
   aiCars: [],
   cars: [],
@@ -197,6 +287,8 @@ const gameState = {
   currentCameraIndex: 0,
   selectedDifficultyId: "expert",
   difficultyConfig: null,
+  selectedWeatherId: "day",
+  weatherConfig: null,
   noticeText: "等待开始",
   noticeTimer: 0,
   results: [],
@@ -210,17 +302,27 @@ const tempVectors = {
 };
 
 let carIdCounter = 1;
+const saveSystem = createSaveSystem();
+const weatherSystem = createWeatherSystem();
+const ghostSystem = createGhostSystem();
+const itemSystem = createItemSystem();
+const debugPanel = createDebugPanel();
 
 boot();
 
 // 初始化顺序保持固定：渲染器、场景、赛道、UI、输入、初始摆放。
 function boot() {
+  saveSystem.load();
   setupRenderer();
   setupScene();
   setupWorld();
   setupTrackAndCars();
   setupUI();
   setupInput();
+  weatherSystem.apply(gameState.selectedWeatherId);
+  itemSystem.init();
+  ghostSystem.init();
+  debugPanel.init();
   resetRace();
   renderHUD();
   animate();
@@ -246,10 +348,10 @@ function setupScene() {
     500,
   );
 
-  const ambientLight = new THREE.HemisphereLight(0xd9f4ff, 0x234018, 1.35);
-  const sunLight = new THREE.DirectionalLight(0xffffff, 1.1);
-  sunLight.position.set(70, 85, 40);
-  gameState.scene.add(ambientLight, sunLight);
+  gameState.ambientLight = new THREE.HemisphereLight(0xd9f4ff, 0x234018, 1.35);
+  gameState.sunLight = new THREE.DirectionalLight(0xffffff, 1.1);
+  gameState.sunLight.position.set(70, 85, 40);
+  gameState.scene.add(gameState.ambientLight, gameState.sunLight);
 }
 
 function setupWorld() {
@@ -267,6 +369,8 @@ function setupWorld() {
   innerField.rotation.x = -Math.PI / 2;
   innerField.position.y = 0.01;
   gameState.scene.add(innerField);
+  gameState.world.ground = ground;
+  gameState.world.innerField = innerField;
 
   for (let index = 0; index < 28; index += 1) {
     const tree = new THREE.Group();
@@ -295,6 +399,7 @@ function setupTrackAndCars() {
   gameState.player = createCar("player", 0xff8648, CONFIG.names.player);
   gameState.scene.add(gameState.player.mesh);
   applyDifficultySelection(gameState.selectedDifficultyId);
+  weatherSystem.apply(gameState.selectedWeatherId);
   rebuildAIField();
 }
 
@@ -302,6 +407,12 @@ function setupUI() {
   for (const button of ui.difficultyButtons) {
     button.addEventListener("click", () => {
       applyDifficultySelection(button.dataset.difficulty);
+    });
+  }
+
+  for (const button of ui.weatherButtons) {
+    button.addEventListener("click", () => {
+      weatherSystem.apply(button.dataset.weather);
     });
   }
 
@@ -332,6 +443,539 @@ function applyDifficultySelection(difficultyId) {
   }
 
   renderHUD();
+}
+
+function applyWeatherSelection(weatherId) {
+  const nextWeather = CONFIG.weatherPresets[weatherId] ?? CONFIG.weatherPresets.day;
+  gameState.selectedWeatherId = weatherId in CONFIG.weatherPresets ? weatherId : "day";
+  gameState.weatherConfig = nextWeather;
+
+  ui.weatherDescription.textContent = nextWeather.description;
+  for (const button of ui.weatherButtons) {
+    button.classList.toggle("active", button.dataset.weather === gameState.selectedWeatherId);
+  }
+
+  renderHUD();
+}
+
+function createSaveSystem() {
+  return {
+    records: {
+      bestLap: null,
+      bestTotal: null,
+    },
+    latestFlags: {
+      bestLap: false,
+      bestTotal: false,
+    },
+    load() {
+      try {
+        const raw = window.localStorage.getItem(CONFIG.save.storageKey);
+        if (!raw) {
+          return;
+        }
+
+        const parsed = JSON.parse(raw);
+        if (typeof parsed.bestLap === "number") {
+          this.records.bestLap = parsed.bestLap;
+        }
+        if (typeof parsed.bestTotal === "number") {
+          this.records.bestTotal = parsed.bestTotal;
+        }
+      } catch {
+        // 本地存档失败时保持静默回退，避免影响比赛主流程。
+      }
+    },
+    prepareForRace() {
+      this.latestFlags.bestLap = false;
+      this.latestFlags.bestTotal = false;
+    },
+    updateRecords(player) {
+      this.prepareForRace();
+
+      if (!player?.finishTime) {
+        return;
+      }
+
+      const fastestLap = player.lapTimes.length > 0 ? Math.min(...player.lapTimes) : null;
+
+      if (
+        typeof fastestLap === "number" &&
+        (this.records.bestLap === null || fastestLap < this.records.bestLap)
+      ) {
+        this.records.bestLap = fastestLap;
+        this.latestFlags.bestLap = true;
+      }
+
+      if (this.records.bestTotal === null || player.finishTime < this.records.bestTotal) {
+        this.records.bestTotal = player.finishTime;
+        this.latestFlags.bestTotal = true;
+      }
+
+      try {
+        window.localStorage.setItem(CONFIG.save.storageKey, JSON.stringify(this.records));
+      } catch {
+        // 本地存储不可用时，不阻断结算展示。
+      }
+    },
+    getBestLapLabel() {
+      return this.records.bestLap === null ? "暂无" : formatTime(this.records.bestLap);
+    },
+    getBestTotalLabel() {
+      return this.records.bestTotal === null ? "暂无" : formatTime(this.records.bestTotal);
+    },
+    getRecordFlagText() {
+      const labels = [];
+      if (this.latestFlags.bestLap) {
+        labels.push("最快单圈新纪录");
+      }
+      if (this.latestFlags.bestTotal) {
+        labels.push("最佳总成绩新纪录");
+      }
+      return labels.length > 0 ? `新纪录：${labels.join(" / ")}` : "";
+    },
+  };
+}
+
+function createWeatherSystem() {
+  return {
+    apply(weatherId) {
+      applyWeatherSelection(weatherId);
+
+      if (!gameState.scene || !gameState.ambientLight || !gameState.sunLight) {
+        return;
+      }
+
+      const preset = gameState.weatherConfig;
+      gameState.scene.background = new THREE.Color(preset.background);
+      gameState.scene.fog = new THREE.Fog(preset.background, preset.fogNear, preset.fogFar);
+      gameState.ambientLight.color.setHex(preset.ambientSky);
+      gameState.ambientLight.groundColor.setHex(preset.ambientGround);
+      gameState.ambientLight.intensity = preset.ambientIntensity;
+      gameState.sunLight.color.setHex(preset.sunColor);
+      gameState.sunLight.intensity = preset.sunIntensity;
+      gameState.sunLight.position.set(...preset.sunPosition);
+
+      if (gameState.world.ground) {
+        gameState.world.ground.material.color.setHex(preset.groundColor);
+      }
+      if (gameState.world.innerField) {
+        gameState.world.innerField.material.color.setHex(preset.innerFieldColor);
+      }
+      if (gameState.track?.trackMesh) {
+        gameState.track.trackMesh.material.color.setHex(preset.trackColor);
+      }
+    },
+  };
+}
+
+function createGhostSystem() {
+  return {
+    ghostCar: null,
+    recordedFrames: [],
+    lastRunFrames: [],
+    playbackFrames: [],
+    lastRecordedAt: 0,
+    playbackTime: 0,
+    init() {
+      this.ghostCar = createCar("ghost", 0x79d8ff, "幽灵车");
+      this.ghostCar.mesh.visible = false;
+      this.ghostCar.mesh.traverse((child) => {
+        if (child.isMesh) {
+          child.material = child.material.clone();
+          child.material.transparent = true;
+          child.material.opacity = 0.34;
+          child.material.depthWrite = false;
+          if ("emissive" in child.material) {
+            child.material.emissive = new THREE.Color(0x234868);
+          }
+        }
+      });
+      gameState.scene.add(this.ghostCar.mesh);
+    },
+    prepareForRace() {
+      this.recordedFrames = [];
+      this.lastRecordedAt = 0;
+      this.playbackTime = 0;
+      this.playbackFrames = this.lastRunFrames;
+      this.ghostCar.mesh.visible = false;
+
+      if (this.playbackFrames.length > 1) {
+        this.applyFrame(this.playbackFrames[0]);
+      }
+    },
+    resetPlayback() {
+      this.recordedFrames = [];
+      this.lastRecordedAt = 0;
+      this.playbackTime = 0;
+      if (this.ghostCar) {
+        this.ghostCar.mesh.visible = false;
+      }
+    },
+    update(dt) {
+      if (!this.ghostCar || gameState.status !== "running" || this.playbackFrames.length < 2) {
+        return;
+      }
+
+      this.ghostCar.mesh.visible = true;
+
+      this.playbackTime += dt;
+      const maxTime = this.playbackFrames[this.playbackFrames.length - 1].time;
+      if (this.playbackTime >= maxTime) {
+        this.applyFrame(this.playbackFrames[this.playbackFrames.length - 1]);
+        return;
+      }
+
+      const sampleIndex = Math.min(
+        this.playbackFrames.length - 2,
+        Math.floor(this.playbackTime / CONFIG.ghost.sampleInterval),
+      );
+      const current = this.playbackFrames[sampleIndex];
+      const next = this.playbackFrames[sampleIndex + 1];
+      const span = Math.max(0.0001, next.time - current.time);
+      const t = clamp((this.playbackTime - current.time) / span, 0, 1);
+      this.ghostCar.mesh.position.set(
+        lerp(current.x, next.x, t),
+        lerp(current.y, next.y, t),
+        lerp(current.z, next.z, t),
+      );
+      this.ghostCar.yaw = lerpAngle(current.yaw, next.yaw, t);
+      applyCarVisualTransform(this.ghostCar);
+    },
+    recordFrame(player, raceTime) {
+      if (!player || gameState.status !== "running") {
+        return;
+      }
+
+      if (
+        this.recordedFrames.length > 0 &&
+        raceTime - this.lastRecordedAt < CONFIG.ghost.sampleInterval
+      ) {
+        return;
+      }
+
+      this.recordedFrames.push({
+        time: raceTime,
+        x: player.mesh.position.x,
+        y: player.mesh.position.y,
+        z: player.mesh.position.z,
+        yaw: player.yaw,
+      });
+      this.lastRecordedAt = raceTime;
+    },
+    finishRun(player) {
+      if (!player || this.recordedFrames.length < 10) {
+        return;
+      }
+
+      this.recordedFrames.push({
+        time: player.finishTime,
+        x: player.mesh.position.x,
+        y: player.mesh.position.y,
+        z: player.mesh.position.z,
+        yaw: player.yaw,
+      });
+      this.lastRunFrames = this.recordedFrames.map((frame) => ({ ...frame }));
+      this.ghostCar.mesh.visible = false;
+    },
+    applyFrame(frame) {
+      if (!frame) {
+        return;
+      }
+      this.ghostCar.mesh.position.set(frame.x, frame.y, frame.z);
+      this.ghostCar.yaw = frame.yaw;
+      applyCarVisualTransform(this.ghostCar);
+    },
+  };
+}
+
+function createItemSystem() {
+  return {
+    boxes: [],
+    boxGroup: null,
+    shockwaves: [],
+    init() {
+      this.boxGroup = new THREE.Group();
+      gameState.scene.add(this.boxGroup);
+      this.buildBoxes();
+    },
+    buildBoxes() {
+      this.boxGroup.clear();
+      this.boxes = [];
+      this.shockwaves = [];
+
+      for (let index = 0; index < CONFIG.items.pickupPoints; index += 1) {
+        const progress =
+          ((index + 0.5) / CONFIG.items.pickupPoints) * gameState.track.totalLength;
+        const frame = getFrameAtProgress(gameState.track, progress);
+        const mesh = this.createBoxMesh(index);
+        mesh.position.copy(frame.position);
+        mesh.position.y = 1.55;
+        this.boxGroup.add(mesh);
+        this.boxes.push({
+          mesh,
+          progress,
+          baseY: 1.55,
+          bobOffset: index * 0.8,
+          active: true,
+          respawnTimer: 0,
+        });
+      }
+    },
+    resetForRace() {
+      for (const box of this.boxes) {
+        box.active = true;
+        box.respawnTimer = 0;
+        box.mesh.visible = true;
+      }
+
+      for (const car of gameState.cars) {
+        car.currentItem = null;
+        car.itemBoostTimer = 0;
+        car.slowTimer = 0;
+      }
+
+      for (const effect of this.shockwaves) {
+        effect.life = 0;
+        effect.mesh.visible = false;
+      }
+    },
+    update(dt) {
+      for (const car of gameState.cars) {
+        car.slowTimer = Math.max(0, car.slowTimer - dt);
+      }
+
+      for (const box of this.boxes) {
+        if (box.active) {
+          box.mesh.rotation.y += CONFIG.items.spinSpeed * dt;
+          box.mesh.position.y =
+            box.baseY + Math.sin(gameState.elapsedTime * 2.4 + box.bobOffset) * CONFIG.items.bobAmplitude;
+        } else {
+          box.respawnTimer = Math.max(0, box.respawnTimer - dt);
+          if (box.respawnTimer <= 0) {
+            box.active = true;
+            box.mesh.visible = true;
+          }
+        }
+      }
+
+      for (const effect of this.shockwaves) {
+        if (effect.life <= 0) {
+          continue;
+        }
+
+        effect.life = Math.max(0, effect.life - dt);
+        const progress = 1 - effect.life / CONFIG.items.shockwaveVisualSeconds;
+        effect.mesh.visible = effect.life > 0;
+        effect.mesh.scale.setScalar(1 + progress * 5.4);
+        effect.mesh.material.opacity = (1 - progress) * 0.5;
+      }
+    },
+    handlePickups() {
+      for (const box of this.boxes) {
+        if (!box.active) {
+          continue;
+        }
+
+        for (const car of gameState.cars) {
+          if (car.finished || car.currentItem) {
+            continue;
+          }
+
+          if (car.mesh.position.distanceTo(box.mesh.position) > CONFIG.items.pickupRadius) {
+            continue;
+          }
+
+          car.currentItem = Math.random() < 0.5 ? "boost" : "shockwave";
+          box.active = false;
+          box.mesh.visible = false;
+          box.respawnTimer = CONFIG.items.boxRespawnSeconds;
+
+          if (car.type === "player") {
+            setNotice(`获得道具：${this.getItemLabel(car.currentItem)}`, 1.2);
+          }
+          break;
+        }
+      }
+    },
+    updateAIUsage() {
+      for (const car of gameState.aiCars) {
+        if (!car.currentItem || car.finished) {
+          continue;
+        }
+
+        if (car.currentItem === "boost") {
+          const onStraight = Math.abs(car.steering) < 1.2;
+          if (onStraight && getForwardSpeed(car) > 16) {
+            this.useItem(car);
+          }
+          continue;
+        }
+
+        if (car.currentItem === "shockwave") {
+          const hasTargets = gameState.cars.some((target) => {
+            return (
+              target !== car &&
+              !target.finished &&
+              target.mesh.position.distanceTo(car.mesh.position) < CONFIG.items.shockwaveRadius
+            );
+          });
+
+          if (hasTargets) {
+            this.useItem(car);
+          }
+        }
+      }
+    },
+    useItem(car) {
+      if (!car?.currentItem) {
+        return false;
+      }
+
+      const itemType = car.currentItem;
+      car.currentItem = null;
+
+      if (itemType === "boost") {
+        car.itemBoostTimer = Math.max(car.itemBoostTimer, CONFIG.items.boostDuration);
+        if (car.type === "player") {
+          setNotice("道具加速已触发", 1);
+        }
+        return true;
+      }
+
+      if (itemType === "shockwave") {
+        this.triggerShockwave(car);
+        if (car.type === "player") {
+          setNotice("冲击波已释放", 1);
+        }
+        return true;
+      }
+
+      return false;
+    },
+    triggerShockwave(sourceCar) {
+      let hitCount = 0;
+      for (const target of gameState.cars) {
+        if (target === sourceCar || target.finished) {
+          continue;
+        }
+
+        const distance = target.mesh.position.distanceTo(sourceCar.mesh.position);
+        if (distance > CONFIG.items.shockwaveRadius) {
+          continue;
+        }
+
+        target.slowTimer = Math.max(target.slowTimer, CONFIG.items.shockwaveSlowSeconds);
+        target.velocity.multiplyScalar(0.74);
+        hitCount += 1;
+
+        if (target.type === "player") {
+          setNotice("被冲击波减速", 1);
+        }
+      }
+
+      const effect = this.obtainShockwaveEffect();
+      effect.mesh.position.copy(sourceCar.mesh.position);
+      effect.mesh.position.y = 0.18;
+      effect.mesh.scale.setScalar(1);
+      effect.mesh.visible = true;
+      effect.life = CONFIG.items.shockwaveVisualSeconds;
+
+      if (sourceCar.type === "player" && hitCount === 0) {
+        setNotice("冲击波已释放，但没有命中目标", 1);
+      }
+    },
+    obtainShockwaveEffect() {
+      const available = this.shockwaves.find((effect) => effect.life <= 0);
+      if (available) {
+        return available;
+      }
+
+      const mesh = new THREE.Mesh(
+        new THREE.TorusGeometry(2.2, 0.22, 12, 28),
+        new THREE.MeshBasicMaterial({
+          color: 0x79d8ff,
+          transparent: true,
+          opacity: 0.5,
+        }),
+      );
+      mesh.rotation.x = Math.PI / 2;
+      mesh.visible = false;
+      gameState.scene.add(mesh);
+      const effect = { mesh, life: 0 };
+      this.shockwaves.push(effect);
+      return effect;
+    },
+    createBoxMesh(index) {
+      const group = new THREE.Group();
+      const outer = new THREE.Mesh(
+        new THREE.BoxGeometry(2.2, 2.2, 2.2),
+        new THREE.MeshStandardMaterial({
+          color: index % 2 === 0 ? 0xffce56 : 0x79d8ff,
+          emissive: index % 2 === 0 ? 0x4f3300 : 0x12344f,
+          transparent: true,
+          opacity: 0.8,
+        }),
+      );
+      const inner = new THREE.Mesh(
+        new THREE.BoxGeometry(1.1, 1.1, 1.1),
+        new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x2f2f2f }),
+      );
+      group.add(outer, inner);
+      return group;
+    },
+    getItemLabel(itemType) {
+      if (itemType === "boost") {
+        return "加速道具";
+      }
+      if (itemType === "shockwave") {
+        return "冲击波";
+      }
+      return "无";
+    },
+  };
+}
+
+function createDebugPanel() {
+  return {
+    visible: false,
+    init() {
+      ui.debugToggle.addEventListener("click", () => {
+        this.visible = !this.visible;
+        ui.debugPanel.classList.toggle("hidden", !this.visible);
+      });
+
+      this.bindRange(ui.debugMaxSpeed, ui.debugMaxSpeedValue, (value) => {
+        CONFIG.playerPhysics.maxSpeed = value;
+      }, CONFIG.playerPhysics.maxSpeed, 0);
+
+      this.bindRange(ui.debugAcceleration, ui.debugAccelerationValue, (value) => {
+        CONFIG.playerPhysics.acceleration = value;
+      }, CONFIG.playerPhysics.acceleration, 0);
+
+      this.bindRange(ui.debugGrip, ui.debugGripValue, (value) => {
+        CONFIG.playerPhysics.lateralGrip = value;
+        CONFIG.playerPhysics.driftGrip = Math.max(2, value * 0.52);
+      }, CONFIG.playerPhysics.lateralGrip, 1);
+
+      this.bindRange(ui.debugDriftFactor, ui.debugDriftFactorValue, (value) => {
+        CONFIG.playerPhysics.driftSlideForce = value;
+        CONFIG.playerPhysics.driftAssist = value / 48;
+        CONFIG.playerPhysics.driftStability = 5.8 + value * 0.15;
+      }, CONFIG.playerPhysics.driftSlideForce, 1);
+    },
+    bindRange(input, valueNode, applyValue, initialValue, digits) {
+      input.value = String(initialValue);
+      valueNode.textContent = Number(initialValue).toFixed(digits);
+      applyValue(Number(initialValue));
+
+      input.addEventListener("input", () => {
+        const value = Number(input.value);
+        valueNode.textContent = value.toFixed(digits);
+        applyValue(value);
+      });
+    },
+  };
 }
 
 // 根据当前难度重新生成 AI 阵容，避免不同难度只是简单改一个数字。
@@ -398,6 +1042,7 @@ function setupInput() {
       "KeyD",
       "KeyC",
       "KeyR",
+      "KeyF",
     ];
 
     if (trackedKeys.includes(event.code)) {
@@ -434,6 +1079,10 @@ function setupInput() {
     if (event.code === "KeyR" && gameState.status === "running") {
       resetCarToCheckpoint(gameState.player, "手动复位");
     }
+
+    if (event.code === "KeyF" && gameState.status === "running") {
+      itemSystem.useItem(gameState.player);
+    }
   };
 
   window.addEventListener("keydown", (event) => onKey(event, true));
@@ -443,6 +1092,8 @@ function setupInput() {
 function startCountdown() {
   rebuildAIField();
   resetRace();
+  ghostSystem.prepareForRace();
+  itemSystem.resetForRace();
   gameState.status = "countdown";
   gameState.countdownRemaining = CONFIG.countdownSeconds + CONFIG.countdownLead;
   ui.hud.classList.remove("hidden");
@@ -458,6 +1109,7 @@ function resetRace() {
   gameState.results = [];
   gameState.noticeText = "等待开始";
   gameState.noticeTimer = 0;
+  saveSystem.prepareForRace();
 
   const spawnSetups = buildSpawnSetups(gameState.cars.length);
 
@@ -466,6 +1118,7 @@ function resetRace() {
     placeCarOnTrack(car, spawn.progress, spawn.laneOffset);
   });
 
+  ghostSystem.resetPlayback();
   computeRanking();
 }
 
@@ -495,6 +1148,8 @@ function updateGame(dt) {
   }
 
   gameState.elapsedTime += dt;
+  itemSystem.update(dt);
+  ghostSystem.update(dt);
 
   updatePlayerCar(dt, inputState);
 
@@ -520,6 +1175,9 @@ function updateGame(dt) {
     }
   }
 
+  itemSystem.handlePickups();
+  itemSystem.updateAIUsage(dt);
+  ghostSystem.recordFrame(gameState.player, gameState.elapsedTime);
   computeRanking();
 }
 
@@ -673,6 +1331,7 @@ function simulateCarPhysics(car, control, dt, physics) {
   const right = getRightVector(car.yaw, tempVectors.right);
   let forwardSpeed = car.velocity.dot(forward);
   let lateralSpeed = car.velocity.dot(right);
+  const slowFactor = car.slowTimer > 0 ? CONFIG.items.shockwaveSlowFactor : 1;
   const speedRatio = clamp(Math.abs(forwardSpeed) / physics.maxSpeed, 0, 1.25);
   const steeringAmount =
     control.steer *
@@ -687,14 +1346,14 @@ function simulateCarPhysics(car, control, dt, physics) {
   }
 
   if (control.throttle) {
-    forwardSpeed += physics.acceleration * dt;
+    forwardSpeed += physics.acceleration * slowFactor * dt;
   }
 
   if (control.brake) {
     if (forwardSpeed > -1) {
-      forwardSpeed -= physics.braking * dt;
+      forwardSpeed -= physics.braking * slowFactor * dt;
     } else {
-      forwardSpeed -= physics.reverseAcceleration * dt;
+      forwardSpeed -= physics.reverseAcceleration * slowFactor * dt;
     }
   }
 
@@ -728,6 +1387,11 @@ function simulateCarPhysics(car, control, dt, physics) {
     car.boostTimer = Math.max(0, car.boostTimer - dt);
   }
 
+  if (car.itemBoostTimer > 0) {
+    forwardSpeed += CONFIG.items.boostAcceleration * dt;
+    car.itemBoostTimer = Math.max(0, car.itemBoostTimer - dt);
+  }
+
   const drifting =
     control.drift &&
     Math.abs(forwardSpeed) > physics.minDriftSpeed &&
@@ -752,8 +1416,14 @@ function simulateCarPhysics(car, control, dt, physics) {
 
   car.wasDrifting = drifting;
 
-  const topSpeedBonus = car.boostTimer > 0 ? physics.boostTopSpeedBonus : 0;
-  forwardSpeed = clamp(forwardSpeed, -physics.maxReverseSpeed, physics.maxSpeed + topSpeedBonus);
+  const topSpeedBonus =
+    (car.boostTimer > 0 ? physics.boostTopSpeedBonus : 0) +
+    (car.itemBoostTimer > 0 ? CONFIG.items.boostTopSpeedBonus : 0);
+  forwardSpeed = clamp(
+    forwardSpeed,
+    -physics.maxReverseSpeed,
+    physics.maxSpeed * slowFactor + topSpeedBonus,
+  );
 
   if (!control.throttle && !control.brake && Math.abs(forwardSpeed) < 0.12) {
     forwardSpeed = 0;
@@ -858,6 +1528,8 @@ function finishRace() {
   for (const car of gameState.cars) {
     car.velocity.set(0, 0, 0);
   }
+  ghostSystem.finishRun(gameState.player);
+  saveSystem.updateRecords(gameState.player);
   computeRanking();
   gameState.results = [...gameState.standings];
   ui.resultScreen.classList.remove("hidden");
@@ -916,8 +1588,10 @@ function renderHUD() {
   ui.speedValue.textContent = `${Math.round(player.velocity.length() * 3.6)} km/h`;
   ui.timeValue.textContent = formatTime(gameState.elapsedTime);
   ui.cameraValue.textContent = CONFIG.cameraModes[gameState.currentCameraIndex].label;
+  ui.itemValue.textContent = itemSystem.getItemLabel(player.currentItem);
   ui.boostValue.textContent = getBoostLabel(player);
   ui.difficultyValue.textContent = gameState.difficultyConfig?.label ?? "进阶";
+  ui.weatherValue.textContent = gameState.weatherConfig?.label ?? "白天";
   ui.statusValue.textContent = getStatusLabel(player);
 }
 
@@ -927,6 +1601,9 @@ function showResults() {
   ui.resultSummary.textContent =
     `${gameState.difficultyConfig?.label ?? "进阶"}难度，总用时 ` +
     `${formatTime(player.finishTime || gameState.elapsedTime)}，本场共有 ${gameState.cars.length} 辆赛车。`;
+  ui.recordBestTotal.textContent = `最佳总成绩：${saveSystem.getBestTotalLabel()}`;
+  ui.recordBestLap.textContent = `最快单圈：${saveSystem.getBestLapLabel()}`;
+  ui.recordFlags.textContent = saveSystem.getRecordFlagText();
 
   ui.resultList.innerHTML = "";
   for (const car of gameState.results) {
@@ -993,6 +1670,7 @@ function createTrack() {
     totalLength,
     halfWidth,
     checkpoints,
+    trackMesh: null,
   };
 
   const outerPoints = buildRoundedRectLoop(
@@ -1019,6 +1697,7 @@ function createTrack() {
   );
   trackMesh.position.y = 0.02;
   trackGroup.add(trackMesh);
+  trackData.trackMesh = trackMesh;
 
   addLaneMarkers(trackGroup, centerPoints);
   addBarriers(trackGroup, centerPoints, halfWidth);
@@ -1265,6 +1944,9 @@ function createCar(type, color, label) {
     wasDrifting: false,
     driftCharge: 0,
     boostTimer: 0,
+    itemBoostTimer: 0,
+    currentItem: null,
+    slowTimer: 0,
     completedLaps: 0,
     nextCheckpointIndex: 0,
     lapTimes: [],
@@ -1305,6 +1987,9 @@ function placeCarOnTrack(car, progress, laneOffset) {
   car.wasDrifting = false;
   car.driftCharge = 0;
   car.boostTimer = 0;
+  car.itemBoostTimer = 0;
+  car.currentItem = null;
+  car.slowTimer = 0;
   car.completedLaps = 0;
   car.nextCheckpointIndex = 0;
   car.lapTimes = [];
@@ -1346,6 +2031,9 @@ function resetCarToCheckpoint(car, noticeText) {
   car.steering = 0;
   car.driftCharge = 0;
   car.boostTimer = 0;
+  car.itemBoostTimer = 0;
+  car.currentItem = null;
+  car.slowTimer = 0;
   car.wasDrifting = false;
   car.trackProgress = car.respawnState.trackProgress;
   car.absoluteProgress = car.respawnState.absoluteProgress;
@@ -1450,6 +2138,10 @@ function getForwardSpeed(car) {
 }
 
 function getBoostLabel(player) {
+  if (player.itemBoostTimer > 0) {
+    return "道具加速中";
+  }
+
   if (player.boostTimer > 0) {
     return "增压中";
   }
@@ -1499,6 +2191,10 @@ function formatTime(seconds) {
   const wholeSeconds = Math.floor(remainder);
   const milliseconds = Math.floor((remainder - wholeSeconds) * 1000);
   return `${String(minutes).padStart(2, "0")}:${String(wholeSeconds).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
+}
+
+function lerpAngle(start, end, t) {
+  return start + wrapAngle(end - start) * t;
 }
 
 function wrapAngle(angle) {
