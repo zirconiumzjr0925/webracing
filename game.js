@@ -1,4 +1,4 @@
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js";
+import * as THREE from "./vendor/three.module.js";
 
 // 游戏的全部可调参数集中在这里，便于统一调整手感和赛道尺寸。
 const CONFIG = {
@@ -32,20 +32,24 @@ const CONFIG = {
     coastDrag: 1.6,
     airDrag: 0.016,
     lateralGrip: 10.2,
-    driftGrip: 3.8,
+    driftGrip: 5.3,
     steeringPower: 2.6,
     steeringFalloff: 0.5,
-    driftTurnBoost: 1.32,
-    driftSlideForce: 17,
-    handbrakeDrag: 3.2,
-    minDriftSpeed: 14,
-    minBoostCharge: 26,
+    driftTurnBoost: 1.24,
+    driftSlideForce: 12.5,
+    handbrakeDrag: 1.45,
+    minDriftSpeed: 12,
+    minBoostCharge: 18,
     maxDriftCharge: 100,
-    driftChargeRate: 38,
-    boostBaseDuration: 0.45,
-    boostExtraDuration: 1.15,
-    boostAcceleration: 42,
-    boostTopSpeedBonus: 16,
+    driftChargeRate: 54,
+    boostBaseDuration: 0.8,
+    boostExtraDuration: 1.55,
+    boostAcceleration: 58,
+    boostTopSpeedBonus: 24,
+    driftAssist: 0.26,
+    driftStability: 7.5,
+    driftSlipCap: 10.8,
+    driftThrottleBonus: 5.8,
   },
   aiPhysics: {
     maxSpeed: 40,
@@ -70,6 +74,10 @@ const CONFIG = {
     boostExtraDuration: 0,
     boostAcceleration: 0,
     boostTopSpeedBonus: 0,
+    driftAssist: 0,
+    driftStability: 0,
+    driftSlipCap: 999,
+    driftThrottleBonus: 0,
   },
   wrongWayResetSeconds: 1.6,
   carBaseHeight: 0.45,
@@ -695,8 +703,18 @@ function simulateCarPhysics(car, control, dt, physics) {
   }
 
   if (control.drift && Math.abs(forwardSpeed) > physics.minDriftSpeed) {
+    // 漂移时给一个“跟手但不暴走”的目标侧滑量，降低纯数值滑飞的风险。
     lateralSpeed += control.steer * physics.driftSlideForce * dt;
     forwardSpeed *= Math.max(0, 1 - physics.handbrakeDrag * dt);
+
+    const desiredSlip =
+      control.steer *
+      Math.min(Math.abs(forwardSpeed) * physics.driftAssist, physics.driftSlipCap);
+    lateralSpeed = lerp(lateralSpeed, desiredSlip, dt * physics.driftStability);
+
+    if (control.throttle) {
+      forwardSpeed += physics.driftThrottleBonus * dt;
+    }
   }
 
   const lateralGrip = control.drift ? physics.driftGrip : physics.lateralGrip;
@@ -716,7 +734,10 @@ function simulateCarPhysics(car, control, dt, physics) {
     Math.abs(lateralSpeed) > 2.2;
 
   if (drifting && physics.driftChargeRate > 0) {
-    const chargeGain = physics.driftChargeRate * dt * (0.4 + clamp(Math.abs(lateralSpeed) / 10, 0, 1));
+    const chargeGain =
+      physics.driftChargeRate *
+      dt *
+      (0.75 + clamp(Math.abs(lateralSpeed) / 10, 0, 1) * 0.5);
     car.driftCharge = clamp(car.driftCharge + chargeGain, 0, physics.maxDriftCharge);
   }
 
