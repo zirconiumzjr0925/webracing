@@ -12,103 +12,115 @@
   <div class="screen-glow" aria-hidden="true"></div>
 
   <div id="start-screen" class="overlay visible">
-    <div class="panel panel-large">
-      <p class="eyebrow">Three.js 3D 浏览器赛车</p>
-      <h1 class="hero-title">
-        <span>霓虹弯道</span>
-        <span>冲刺</span>
-      </h1>
-      <p class="intro">
-        在封闭赛道中与多名 AI 对手竞速，完成 3 圈并尽可能拿下第一名。
-      </p>
-      <div class="instruction-grid">
-        <div class="instruction-card">
-          <h2>基础操作</h2>
-          <p>`WASD` / 方向键：加速、刹车、转向</p>
-          <p>`Space`：漂移 / 手刹</p>
-          <p>`F`：使用当前道具</p>
-          <p>`C`：切换镜头</p>
-          <p>`R`：手动复位</p>
+    <div class="panel panel-large start-panel">
+      <div class="start-header">
+        <p class="eyebrow">Three.js 3D 浏览器赛车</p>
+        <h1 class="hero-title">
+          <span>霓虹弯道</span>
+          <span>冲刺</span>
+        </h1>
+        <p class="intro">
+          在封闭赛道中与多名 AI 对手竞速，完成 3 圈并尽可能拿下第一名。
+        </p>
+      </div>
+      <div class="start-content">
+        <div class="start-column start-column-info">
+          <div class="instruction-grid start-instruction-grid">
+            <div class="instruction-card">
+              <h2>基础操作</h2>
+              <p>`WASD` / 方向键：加速、刹车、转向</p>
+              <p>`Space`：漂移 / 手刹</p>
+              <p>`F`：使用当前道具</p>
+              <p>`C`：切换镜头</p>
+              <p>`R`：手动复位</p>
+            </div>
+            <div class="instruction-card">
+              <h2>比赛规则</h2>
+              <p>必须按顺序通过检查点，才能完成有效计圈。</p>
+              <p>冲出赛道或长时间逆行会自动复位到最近检查点。</p>
+              <p>连续漂移可积累增压，松开手刹会自动释放。</p>
+              <p>道具盒会提供加速、导弹、地雷和范围冲击波。</p>
+            </div>
+          </div>
+          <div class="record-board start-record-board">
+            <p id="start-best-total" class="record-line">最佳总成绩：暂无</p>
+            <p id="start-best-lap" class="record-line">最快单圈：暂无</p>
+            <div class="mini-leaderboard-section">
+              <h3>本地排行榜</h3>
+              <ul id="start-leaderboard-list" class="mini-leaderboard-list"></ul>
+            </div>
+          </div>
         </div>
-        <div class="instruction-card">
-          <h2>比赛规则</h2>
-          <p>必须按顺序通过检查点，才能完成有效计圈。</p>
-          <p>冲出赛道或长时间逆行会自动复位到最近检查点。</p>
-          <p>连续漂移可积累增压，松开手刹会自动释放。</p>
-          <p>道具盒会提供加速、导弹、地雷和范围冲击波。</p>
+        <div class="start-column start-column-setup">
+          <div class="start-selection-grid">
+            <div class="difficulty-section start-section">
+              <div class="difficulty-header">
+                <h2>选择难度</h2>
+                <p id="difficulty-description" class="difficulty-description">
+                  进阶：5 名 AI 参赛，对手速度更快，整体节奏更紧。
+                </p>
+              </div>
+              <div class="difficulty-options">
+                <button class="difficulty-option" type="button" data-difficulty="casual">
+                  <strong>休闲</strong>
+                  <span>3 名 AI，偏稳定节奏</span>
+                </button>
+                <button class="difficulty-option active" type="button" data-difficulty="expert">
+                  <strong>进阶</strong>
+                  <span>5 名 AI，默认更有竞争力</span>
+                </button>
+                <button class="difficulty-option" type="button" data-difficulty="legend">
+                  <strong>极限</strong>
+                  <span>7 名 AI，前排速度明显更快</span>
+                </button>
+              </div>
+            </div>
+            <div class="difficulty-section start-section">
+              <div class="difficulty-header">
+                <h2>选择赛道</h2>
+                <p id="track-description" class="difficulty-description">
+                  霓虹环线：高速直道更多，适合连续漂移后接增压冲刺。
+                </p>
+              </div>
+              <div class="difficulty-options">
+                <button class="track-option difficulty-option active" type="button" data-track="speedway">
+                  <strong>霓虹环线</strong>
+                  <span>节奏更快，适合以速度和道具压制对手</span>
+                </button>
+                <button class="track-option difficulty-option" type="button" data-track="canyon">
+                  <strong>赤岩峡谷</strong>
+                  <span>连续弯更多，适合控车和埋伏地雷反制</span>
+                </button>
+              </div>
+            </div>
+            <div class="difficulty-section start-section">
+              <div class="difficulty-header">
+                <h2>选择环境</h2>
+                <p id="weather-description" class="difficulty-description">
+                  白天：视野明亮，赛道边界最清晰。
+                </p>
+              </div>
+              <div class="difficulty-options">
+                <button class="weather-option difficulty-option active" type="button" data-weather="day">
+                  <strong>白天</strong>
+                  <span>明亮通透，适合稳定发挥</span>
+                </button>
+                <button class="weather-option difficulty-option" type="button" data-weather="dusk">
+                  <strong>黄昏</strong>
+                  <span>暖色光照，氛围更强烈</span>
+                </button>
+                <button class="weather-option difficulty-option" type="button" data-weather="night">
+                  <strong>夜晚</strong>
+                  <span>更暗的环境，更考验路线感</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="difficulty-section">
-        <div class="difficulty-header">
-          <h2>选择难度</h2>
-          <p id="difficulty-description" class="difficulty-description">
-            进阶：5 名 AI 参赛，对手速度更快，整体节奏更紧。
-          </p>
-        </div>
-        <div class="difficulty-options">
-          <button class="difficulty-option" type="button" data-difficulty="casual">
-            <strong>休闲</strong>
-            <span>3 名 AI，偏稳定节奏</span>
-          </button>
-          <button class="difficulty-option active" type="button" data-difficulty="expert">
-            <strong>进阶</strong>
-            <span>5 名 AI，默认更有竞争力</span>
-          </button>
-          <button class="difficulty-option" type="button" data-difficulty="legend">
-            <strong>极限</strong>
-            <span>7 名 AI，前排速度明显更快</span>
-          </button>
-        </div>
+      <div class="start-actions">
+        <button id="start-button" class="primary-button" type="button">开始游戏</button>
       </div>
-      <div class="difficulty-section">
-        <div class="difficulty-header">
-          <h2>选择赛道</h2>
-          <p id="track-description" class="difficulty-description">
-            霓虹环线：高速直道更多，适合连续漂移后接增压冲刺。
-          </p>
-        </div>
-        <div class="difficulty-options">
-          <button class="track-option difficulty-option active" type="button" data-track="speedway">
-            <strong>霓虹环线</strong>
-            <span>节奏更快，适合以速度和道具压制对手</span>
-          </button>
-          <button class="track-option difficulty-option" type="button" data-track="canyon">
-            <strong>赤岩峡谷</strong>
-            <span>连续弯更多，适合控车和埋伏地雷反制</span>
-          </button>
-        </div>
-      </div>
-      <div class="difficulty-section">
-        <div class="difficulty-header">
-          <h2>选择环境</h2>
-          <p id="weather-description" class="difficulty-description">
-            白天：视野明亮，赛道边界最清晰。
-          </p>
-        </div>
-        <div class="difficulty-options">
-          <button class="weather-option difficulty-option active" type="button" data-weather="day">
-            <strong>白天</strong>
-            <span>明亮通透，适合稳定发挥</span>
-          </button>
-          <button class="weather-option difficulty-option" type="button" data-weather="dusk">
-            <strong>黄昏</strong>
-            <span>暖色光照，氛围更强烈</span>
-          </button>
-          <button class="weather-option difficulty-option" type="button" data-weather="night">
-            <strong>夜晚</strong>
-            <span>更暗的环境，更考验路线感</span>
-          </button>
-        </div>
-      </div>
-      <div class="record-board start-record-board">
-        <p id="start-best-total" class="record-line">最佳总成绩：暂无</p>
-        <p id="start-best-lap" class="record-line">最快单圈：暂无</p>
-        <div class="mini-leaderboard-section">
-          <h3>本地排行榜</h3>
-          <ul id="start-leaderboard-list" class="mini-leaderboard-list"></ul>
-        </div>
-      </div>
-      <button id="start-button" class="primary-button" type="button">开始游戏</button>
     </div>
   </div>
 
