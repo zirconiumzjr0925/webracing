@@ -232,9 +232,13 @@ const ui = {
   startButton: document.getElementById("start-button"),
   countdown: document.getElementById("countdown"),
   hud: document.getElementById("hud"),
+  hudRaceCard: document.getElementById("hud-race-card"),
+  hudTimeCard: document.getElementById("hud-time-card"),
+  hudSpeedCard: document.getElementById("hud-speed-card"),
   lapValue: document.getElementById("lap-value"),
   positionValue: document.getElementById("position-value"),
   speedValue: document.getElementById("speed-value"),
+  speedBarFill: document.getElementById("hud-speed-bar-fill"),
   timeValue: document.getElementById("time-value"),
   cameraValue: document.getElementById("camera-value"),
   itemValue: document.getElementById("item-value"),
@@ -299,6 +303,18 @@ const tempVectors = {
   right: new THREE.Vector3(),
   lookAt: new THREE.Vector3(),
   cameraTarget: new THREE.Vector3(),
+};
+
+const hudVisualState = {
+  lapText: "",
+  rank: null,
+  speedBucket: -1,
+  timeSecond: -1,
+  boostLabel: "",
+  itemLabel: "",
+  statusText: "",
+  boostActive: false,
+  driftActive: false,
 };
 
 let carIdCounter = 1;
@@ -1583,16 +1599,79 @@ function renderHUD() {
   }
 
   const currentLap = player.finished ? CONFIG.totalLaps : Math.min(CONFIG.totalLaps, player.completedLaps + 1);
-  ui.lapValue.textContent = `${currentLap} / ${CONFIG.totalLaps}`;
-  ui.positionValue.textContent = `第 ${player.rank} / ${gameState.cars.length} 名`;
-  ui.speedValue.textContent = `${Math.round(player.velocity.length() * 3.6)} km/h`;
-  ui.timeValue.textContent = formatTime(gameState.elapsedTime);
+  const lapText = `${currentLap} / ${CONFIG.totalLaps}`;
+  const positionText = `第 ${player.rank} / ${gameState.cars.length} 名`;
+  const speedKmh = Math.round(player.velocity.length() * 3.6);
+  const speedText = `${speedKmh} km/h`;
+  const timeText = formatTime(gameState.elapsedTime);
+  const itemText = itemSystem.getItemLabel(player.currentItem);
+  const boostText = getBoostLabel(player);
+  const statusText = getStatusLabel(player);
+  const boostActive = player.boostTimer > 0 || player.itemBoostTimer > 0;
+  const driftActive = player.wasDrifting;
+  const timeSecond = Math.floor(gameState.elapsedTime);
+  const speedBucket = Math.floor(speedKmh / 18);
+
+  ui.lapValue.textContent = lapText;
+  ui.positionValue.textContent = positionText;
+  ui.speedValue.textContent = speedText;
+  ui.timeValue.textContent = timeText;
   ui.cameraValue.textContent = CONFIG.cameraModes[gameState.currentCameraIndex].label;
-  ui.itemValue.textContent = itemSystem.getItemLabel(player.currentItem);
-  ui.boostValue.textContent = getBoostLabel(player);
+  ui.itemValue.textContent = itemText;
+  ui.boostValue.textContent = boostText;
   ui.difficultyValue.textContent = gameState.difficultyConfig?.label ?? "进阶";
   ui.weatherValue.textContent = gameState.weatherConfig?.label ?? "白天";
-  ui.statusValue.textContent = getStatusLabel(player);
+  ui.statusValue.textContent = statusText;
+  ui.statusValue.dataset.tone = getStatusTone(player, boostActive, driftActive);
+
+  ui.hud.classList.toggle("is-drifting", driftActive);
+  ui.hud.classList.toggle("is-boosting", boostActive);
+
+  setSpeedVisuals(speedKmh);
+
+  if (hudVisualState.lapText !== lapText) {
+    pulseUIElement(ui.lapValue, "ui-value-pop");
+    hudVisualState.lapText = lapText;
+  }
+
+  if (hudVisualState.rank !== player.rank) {
+    pulseUIElement(ui.positionValue, "ui-rank-pop");
+    pulseUIElement(ui.hudRaceCard, "ui-status-pop");
+    hudVisualState.rank = player.rank;
+  }
+
+  if (hudVisualState.speedBucket !== speedBucket) {
+    pulseUIElement(ui.speedValue, "ui-value-pop");
+    hudVisualState.speedBucket = speedBucket;
+  }
+
+  if (hudVisualState.timeSecond !== timeSecond) {
+    pulseUIElement(ui.timeValue, "ui-value-pop");
+    hudVisualState.timeSecond = timeSecond;
+  }
+
+  if (hudVisualState.itemLabel !== itemText) {
+    pulseUIElement(ui.itemValue, "ui-status-pop");
+    hudVisualState.itemLabel = itemText;
+  }
+
+  if (hudVisualState.boostLabel !== boostText) {
+    pulseUIElement(ui.boostValue, "ui-status-pop");
+    hudVisualState.boostLabel = boostText;
+  }
+
+  if (hudVisualState.statusText !== statusText) {
+    pulseUIElement(ui.statusValue, "ui-status-pop");
+    hudVisualState.statusText = statusText;
+  }
+
+  if (boostActive && !hudVisualState.boostActive) {
+    pulseUIElement(ui.hudSpeedCard, "boost-burst");
+    pulseUIElement(ui.speedValue, "ui-rank-pop");
+  }
+
+  hudVisualState.boostActive = boostActive;
+  hudVisualState.driftActive = driftActive;
 }
 
 function showResults() {
@@ -1608,17 +1687,64 @@ function showResults() {
   ui.resultList.innerHTML = "";
   for (const car of gameState.results) {
     const item = document.createElement("li");
+    item.className = "result-item";
+    if (car === player) {
+      item.classList.add("is-player");
+    }
+    if (car.rank === 1) {
+      item.classList.add("is-first");
+    }
+
     const suffix = car.finished
       ? `完赛时间 ${formatTime(car.finishTime)}`
       : `停留在第 ${Math.min(CONFIG.totalLaps, car.completedLaps + 1)} 圈`;
-    item.textContent = `${car.label}  ·  ${suffix}`;
+    const badge = document.createElement("span");
+    badge.className = "result-rank-badge";
+    badge.textContent = car.rank === 1 ? "冠军" : `第 ${car.rank} 名`;
+
+    const main = document.createElement("div");
+    main.className = "result-item-main";
+
+    const name = document.createElement("strong");
+    name.className = "result-item-name";
+    name.textContent = car.label;
+
+    const meta = document.createElement("span");
+    meta.className = "result-item-meta";
+    meta.textContent = suffix;
+
+    const tag = document.createElement("span");
+    tag.className = "result-item-tag";
+    tag.textContent = car === player ? "玩家" : car.rank === 1 ? "头名" : "对手";
+
+    main.append(name, meta);
+    item.append(badge, main, tag);
     ui.resultList.appendChild(item);
   }
 
   ui.lapTimeList.innerHTML = "";
+  const bestLap = player.lapTimes.length > 0 ? Math.min(...player.lapTimes) : null;
   player.lapTimes.forEach((lapTime, index) => {
     const item = document.createElement("li");
-    item.textContent = `第 ${index + 1} 圈：${formatTime(lapTime)}`;
+    item.className = "lap-time-item";
+
+    const badge = document.createElement("span");
+    badge.className = "lap-time-badge";
+    badge.textContent = `第 ${index + 1} 圈`;
+
+    const main = document.createElement("div");
+    main.className = "lap-time-main";
+
+    const title = document.createElement("strong");
+    title.className = "lap-time-title";
+    title.textContent = formatTime(lapTime);
+
+    const meta = document.createElement("span");
+    meta.className = "lap-time-meta";
+    meta.textContent = bestLap !== null && lapTime === bestLap ? "本场最快单圈" : "保持节奏推进";
+
+    main.append(title, meta);
+    item.append(badge, main);
     ui.lapTimeList.appendChild(item);
   });
 }
@@ -2135,6 +2261,71 @@ function getRightVector(yaw, target = new THREE.Vector3()) {
 function getForwardSpeed(car) {
   const forward = getForwardVector(car.yaw);
   return car.velocity.dot(forward);
+}
+
+function pulseUIElement(element, className) {
+  if (!element) {
+    return;
+  }
+
+  element.classList.remove(className);
+  void element.offsetWidth;
+  element.classList.add(className);
+}
+
+function setSpeedVisuals(speedKmh) {
+  const ratio = clamp(speedKmh / 230, 0, 1);
+  const speedColor = getSpeedColor(ratio);
+  ui.speedValue.style.color = speedColor;
+  ui.speedValue.style.textShadow = `0 0 26px ${speedColor}`;
+  ui.speedBarFill.style.width = `${Math.round(ratio * 100)}%`;
+}
+
+function getSpeedColor(ratio) {
+  if (ratio <= 0.56) {
+    return mixColor("#f6fbff", "#79d8ff", ratio / 0.56);
+  }
+
+  return mixColor("#79d8ff", "#ff6b74", (ratio - 0.56) / 0.44);
+}
+
+function mixColor(startHex, endHex, ratio) {
+  const t = clamp(ratio, 0, 1);
+  const start = parseHexColor(startHex);
+  const end = parseHexColor(endHex);
+  const red = Math.round(lerp(start.r, end.r, t));
+  const green = Math.round(lerp(start.g, end.g, t));
+  const blue = Math.round(lerp(start.b, end.b, t));
+  return `rgb(${red}, ${green}, ${blue})`;
+}
+
+function parseHexColor(hex) {
+  const safeHex = hex.replace("#", "");
+  return {
+    r: Number.parseInt(safeHex.slice(0, 2), 16),
+    g: Number.parseInt(safeHex.slice(2, 4), 16),
+    b: Number.parseInt(safeHex.slice(4, 6), 16),
+  };
+}
+
+function getStatusTone(player, boostActive, driftActive) {
+  if (player.wrongWayTime > 0.35) {
+    return "warning";
+  }
+
+  if (boostActive) {
+    return "boost";
+  }
+
+  if (driftActive) {
+    return "drift";
+  }
+
+  if (gameState.noticeTimer > 0 || gameState.status === "countdown") {
+    return "notice";
+  }
+
+  return "neutral";
 }
 
 function getBoostLabel(player) {
