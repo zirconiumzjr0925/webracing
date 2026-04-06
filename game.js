@@ -1,4 +1,5 @@
 import * as THREE from "./vendor/three.module.js";
+import { GLTFLoader } from "./vendor/GLTFLoader.js";
 
 // 游戏的全部可调参数集中在这里，便于统一调整手感和赛道尺寸。
 const CONFIG = {
@@ -218,6 +219,56 @@ const CONFIG = {
   },
 };
 
+// 环境美术资源使用本地化的低模 glTF/GLB，便于静态部署和统一管理。
+const MODEL_ASSET_CONFIG = {
+  tree: {
+    path: "./assets/models/environment/tree.glb",
+    fit: "height",
+    target: 8.6,
+  },
+  flowerBushes: {
+    path: "./assets/models/environment/flower-bushes.glb",
+    fit: "span",
+    target: 5.6,
+  },
+  streetlight: {
+    path: "./assets/models/environment/streetlight.glb",
+    fit: "height",
+    target: 8.4,
+  },
+  barrierLarge: {
+    path: "./assets/models/track/barrier-large.glb",
+    fit: "span",
+    target: 5.6,
+  },
+  banner: {
+    path: "./assets/models/track/banner.glb",
+    fit: "height",
+    target: 4.3,
+  },
+  menuBillboard: {
+    path: "./assets/models/props/menu-billboard.glb",
+    fit: "height",
+    target: 4.6,
+  },
+  roadCone: {
+    path: "./assets/models/props/road-cone.glb",
+    fit: "height",
+    target: 1.15,
+  },
+  sportsStands: {
+    path: "./assets/models/props/sports-stands.glb",
+    fit: "span",
+    target: 24,
+  },
+  raceFlag: {
+    path: "./assets/models/props/race-flag.glb",
+    fit: "height",
+    target: 5.2,
+    doubleSide: true,
+  },
+};
+
 const inputState = {
   accelerate: false,
   brake: false,
@@ -323,6 +374,7 @@ const weatherSystem = createWeatherSystem();
 const ghostSystem = createGhostSystem();
 const itemSystem = createItemSystem();
 const debugPanel = createDebugPanel();
+const modelSystem = createModelSystem();
 
 boot();
 
@@ -333,6 +385,7 @@ function boot() {
   setupScene();
   setupWorld();
   setupTrackAndCars();
+  modelSystem.init();
   setupUI();
   setupInput();
   weatherSystem.apply(gameState.selectedWeatherId);
@@ -387,6 +440,10 @@ function setupWorld() {
   gameState.scene.add(innerField);
   gameState.world.ground = ground;
   gameState.world.innerField = innerField;
+  gameState.world.fallbackTreesGroup = new THREE.Group();
+  gameState.world.environmentDecorGroup = new THREE.Group();
+  gameState.world.environmentDecorGroup.name = "环境模型装饰";
+  gameState.scene.add(gameState.world.fallbackTreesGroup, gameState.world.environmentDecorGroup);
 
   for (let index = 0; index < 28; index += 1) {
     const tree = new THREE.Group();
@@ -404,7 +461,7 @@ function setupWorld() {
     trunk.position.y = 1.1;
     foliage.position.y = 3;
     tree.add(trunk, foliage);
-    gameState.scene.add(tree);
+    gameState.world.fallbackTreesGroup.add(tree);
   }
 }
 
@@ -990,6 +1047,340 @@ function createDebugPanel() {
         valueNode.textContent = value.toFixed(digits);
         applyValue(value);
       });
+    },
+  };
+}
+
+function createModelSystem() {
+  return {
+    loader: new GLTFLoader(),
+    prototypes: new Map(),
+    initPromise: null,
+    init() {
+      if (this.initPromise) {
+        return this.initPromise;
+      }
+
+      this.initPromise = this.loadAll()
+        .then(() => {
+          this.populateScene();
+        })
+        .catch((error) => {
+          console.warn("本地模型资源初始化失败，将继续使用几何回退资源。", error);
+        });
+
+      return this.initPromise;
+    },
+    async loadAll() {
+      const entries = Object.entries(MODEL_ASSET_CONFIG);
+      const results = await Promise.allSettled(
+        entries.map(async ([key, config]) => {
+          const gltf = await this.loadGLTF(config.path);
+          const source = gltf.scene || gltf.scenes?.[0];
+          if (!source) {
+            throw new Error(`模型 ${key} 没有可用场景节点`);
+          }
+          this.prototypes.set(key, this.preparePrototype(source, config));
+        }),
+      );
+
+      results.forEach((result, index) => {
+        if (result.status === "rejected") {
+          const [key] = entries[index];
+          console.warn(`模型 ${key} 加载失败，已保留现有几何表现。`, result.reason);
+        }
+      });
+    },
+    loadGLTF(path) {
+      return new Promise((resolve, reject) => {
+        this.loader.load(path, resolve, undefined, reject);
+      });
+    },
+    preparePrototype(source, config) {
+      const root = source.clone(true);
+      const wrapper = new THREE.Group();
+      wrapper.add(root);
+
+      root.traverse((child) => {
+        if (child.isLight) {
+          child.visible = false;
+          return;
+        }
+
+        if (!child.isMesh) {
+          return;
+        }
+
+        child.castShadow = false;
+        child.receiveShadow = true;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        for (const material of materials) {
+          if (!material) {
+            continue;
+          }
+          if (config.doubleSide) {
+            material.side = THREE.DoubleSide;
+          }
+        }
+      });
+
+      const bounds = new THREE.Box3().setFromObject(wrapper);
+      const size = bounds.getSize(new THREE.Vector3());
+      const center = bounds.getCenter(new THREE.Vector3());
+      root.position.x -= center.x;
+      root.position.z -= center.z;
+      root.position.y -= bounds.min.y;
+
+      const height = Math.max(size.y, 0.001);
+      const span = Math.max(size.x, size.z, 0.001);
+      const scaleFactor = config.fit === "span" ? config.target / span : config.target / height;
+      wrapper.scale.setScalar(scaleFactor);
+
+      return wrapper;
+    },
+    clearGroup(group) {
+      if (!group) {
+        return;
+      }
+      group.clear();
+    },
+    hasPrototype(key) {
+      return this.prototypes.has(key);
+    },
+    createInstance(key, options = {}) {
+      const prototype = this.prototypes.get(key);
+      if (!prototype) {
+        return null;
+      }
+
+      const instance = prototype.clone(true);
+      if (options.scale !== undefined) {
+        instance.scale.multiplyScalar(options.scale);
+      }
+      if (options.position) {
+        instance.position.copy(options.position);
+      }
+      if (options.rotationY !== undefined) {
+        instance.rotation.y = options.rotationY;
+      }
+      return instance;
+    },
+    createTrackPlacement(key, ratio, options = {}) {
+      if (!gameState.track) {
+        return null;
+      }
+
+      const frame = getFrameAtProgress(gameState.track, mod(ratio, 1) * gameState.track.totalLength);
+      const side = options.side ?? 1;
+      const offset = options.offset ?? gameState.track.halfWidth + 6;
+      const position = frame.position.clone().addScaledVector(frame.normal, offset * side);
+      position.y = options.y ?? 0;
+
+      let rotationY = options.rotationY;
+      if (options.align === "track") {
+        rotationY = Math.atan2(frame.tangent.x, frame.tangent.z) + (options.rotationOffsetY ?? 0);
+      } else if (options.align === "faceTrack") {
+        rotationY =
+          Math.atan2(frame.position.x - position.x, frame.position.z - position.z) +
+          (options.rotationOffsetY ?? 0);
+      }
+
+      return this.createInstance(key, {
+        position,
+        rotationY,
+        scale: options.scale,
+      });
+    },
+    addTrackPlacement(group, key, ratio, options = {}) {
+      const instance = this.createTrackPlacement(key, ratio, options);
+      if (instance) {
+        group.add(instance);
+      }
+      return instance;
+    },
+    populateScene() {
+      if (!gameState.track || !gameState.world.environmentDecorGroup) {
+        return;
+      }
+
+      this.clearGroup(gameState.world.environmentDecorGroup);
+      this.clearGroup(gameState.track.decorationGroup);
+
+      this.populateNature();
+      this.populateTrackDecorations();
+
+      if (this.hasPrototype("tree") && gameState.world.fallbackTreesGroup) {
+        gameState.world.fallbackTreesGroup.visible = false;
+      }
+    },
+    populateNature() {
+      const group = gameState.world.environmentDecorGroup;
+      if (!group) {
+        return;
+      }
+
+      if (this.hasPrototype("tree")) {
+        const count = 24;
+        for (let index = 0; index < count; index += 1) {
+          const angle = (index / count) * Math.PI * 2 + (stableNoise(index + 11) - 0.5) * 0.18;
+          const radius = 146 + (index % 4) * 10 + stableNoise(index + 21) * 6;
+          const position = new THREE.Vector3(
+            Math.cos(angle) * radius,
+            0,
+            Math.sin(angle) * radius,
+          );
+          const tree = this.createInstance("tree", {
+            position,
+            rotationY: stableNoise(index + 31) * Math.PI * 2,
+            scale: 0.92 + stableNoise(index + 47) * 0.52,
+          });
+          if (tree) {
+            group.add(tree);
+          }
+        }
+      }
+
+      if (this.hasPrototype("flowerBushes")) {
+        const outerBushRatios = [0.04, 0.11, 0.19, 0.27, 0.36, 0.44, 0.55, 0.63, 0.71, 0.82, 0.9];
+        outerBushRatios.forEach((ratio, index) => {
+          this.addTrackPlacement(group, "flowerBushes", ratio, {
+            side: index % 3 === 0 ? -1 : 1,
+            offset: gameState.track.halfWidth + 8 + (index % 3),
+            align: "faceTrack",
+            rotationOffsetY: (stableNoise(index + 71) - 0.5) * 0.8,
+            scale: 0.76 + stableNoise(index + 83) * 0.48,
+          });
+        });
+      }
+    },
+    populateTrackDecorations() {
+      const group = gameState.track?.decorationGroup;
+      if (!group) {
+        return;
+      }
+
+      this.populateStreetlights(group);
+      this.populateGrandstands(group);
+      this.populateBillboards(group);
+      this.populateBarrierDecor(group);
+      this.populateConeDecor(group);
+      this.populateFinishDecor(group);
+    },
+    populateStreetlights(group) {
+      if (!this.hasPrototype("streetlight")) {
+        return;
+      }
+
+      const placements = [0.04, 0.1, 0.16, 0.31, 0.37, 0.53, 0.59, 0.65, 0.8, 0.86, 0.93];
+      placements.forEach((ratio, index) => {
+        this.addTrackPlacement(group, "streetlight", ratio, {
+          side: 1,
+          offset: gameState.track.halfWidth + 11.5 + (index % 2) * 2,
+          align: "track",
+          scale: 0.95 + stableNoise(index + 101) * 0.16,
+        });
+      });
+    },
+    populateGrandstands(group) {
+      if (!this.hasPrototype("sportsStands")) {
+        return;
+      }
+
+      const placements = [0.09, 0.59];
+      placements.forEach((ratio, index) => {
+        this.addTrackPlacement(group, "sportsStands", ratio, {
+          side: 1,
+          offset: gameState.track.halfWidth + 34,
+          align: "faceTrack",
+          scale: 1 + index * 0.04,
+        });
+      });
+    },
+    populateBillboards(group) {
+      if (!this.hasPrototype("menuBillboard")) {
+        return;
+      }
+
+      const placements = [0.18, 0.34, 0.68, 0.84];
+      placements.forEach((ratio, index) => {
+        this.addTrackPlacement(group, "menuBillboard", ratio, {
+          side: 1,
+          offset: gameState.track.halfWidth + 16 + (index % 2) * 3,
+          align: "faceTrack",
+          scale: 0.96 + stableNoise(index + 131) * 0.18,
+        });
+      });
+    },
+    populateBarrierDecor(group) {
+      if (!this.hasPrototype("barrierLarge")) {
+        return;
+      }
+
+      const placements = [0.2, 0.24, 0.45, 0.49, 0.7, 0.74, 0.95, 0.99];
+      placements.forEach((ratio, index) => {
+        this.addTrackPlacement(group, "barrierLarge", ratio, {
+          side: 1,
+          offset: gameState.track.halfWidth + 2.1,
+          align: "track",
+          scale: 0.92 + stableNoise(index + 151) * 0.18,
+        });
+      });
+    },
+    populateConeDecor(group) {
+      if (!this.hasPrototype("roadCone")) {
+        return;
+      }
+
+      const coneGroups = [
+        { baseRatio: 0.012, count: 4, spacing: 0.008, side: 1, offset: gameState.track.halfWidth + 1.4 },
+        { baseRatio: 0.238, count: 3, spacing: 0.007, side: -1, offset: gameState.track.halfWidth + 1.2 },
+        { baseRatio: 0.492, count: 3, spacing: 0.007, side: 1, offset: gameState.track.halfWidth + 1.2 },
+        { baseRatio: 0.744, count: 3, spacing: 0.007, side: -1, offset: gameState.track.halfWidth + 1.2 },
+      ];
+
+      coneGroups.forEach((coneGroup, groupIndex) => {
+        for (let index = 0; index < coneGroup.count; index += 1) {
+          this.addTrackPlacement(group, "roadCone", coneGroup.baseRatio + index * coneGroup.spacing, {
+            side: coneGroup.side,
+            offset: coneGroup.offset + (index % 2) * 0.5,
+            align: "track",
+            scale: 0.96 + stableNoise(groupIndex * 10 + index + 181) * 0.1,
+          });
+        }
+      });
+    },
+    populateFinishDecor(group) {
+      if (this.hasPrototype("banner")) {
+        const bannerPlacements = [
+          { ratio: 0.0, side: 1, offset: gameState.track.halfWidth + 13.5, scale: 1.12 },
+          { ratio: 0.5, side: 1, offset: gameState.track.halfWidth + 10.5, scale: 1 },
+        ];
+        bannerPlacements.forEach((placement) => {
+          this.addTrackPlacement(group, "banner", placement.ratio, {
+            side: placement.side,
+            offset: placement.offset,
+            align: "track",
+            scale: placement.scale,
+          });
+        });
+      }
+
+      if (this.hasPrototype("raceFlag")) {
+        const flagPlacements = [
+          { ratio: 0.986, side: 1, offset: gameState.track.halfWidth + 8.5 },
+          { ratio: 0.024, side: 1, offset: gameState.track.halfWidth + 8.5 },
+          { ratio: 0.478, side: 1, offset: gameState.track.halfWidth + 8.5 },
+          { ratio: 0.524, side: 1, offset: gameState.track.halfWidth + 8.5 },
+        ];
+        flagPlacements.forEach((placement, index) => {
+          this.addTrackPlacement(group, "raceFlag", placement.ratio, {
+            side: placement.side,
+            offset: placement.offset,
+            align: "faceTrack",
+            scale: 0.96 + stableNoise(index + 221) * 0.1,
+          });
+        });
+      }
     },
   };
 }
@@ -1780,6 +2171,7 @@ function updateCamera(dt) {
 // 赛道几何使用圆角矩形闭环，既稳定又适合简单 AI 路径跟随。
 function createTrack() {
   const trackGroup = new THREE.Group();
+  const decorationGroup = new THREE.Group();
   const halfWidth = CONFIG.track.width / 2;
   const centerPoints = buildRoundedRectLoop(
     CONFIG.track.halfX,
@@ -1797,6 +2189,7 @@ function createTrack() {
     halfWidth,
     checkpoints,
     trackMesh: null,
+    decorationGroup,
   };
 
   const outerPoints = buildRoundedRectLoop(
@@ -1829,6 +2222,7 @@ function createTrack() {
   addBarriers(trackGroup, centerPoints, halfWidth);
   addDirectionMarkers(trackGroup, centerPoints, halfWidth);
   addStartLine(trackGroup, trackData, halfWidth);
+  trackGroup.add(decorationGroup);
 
   return trackData;
 }
@@ -2405,6 +2799,11 @@ function clamp(value, min, max) {
 
 function lerp(start, end, t) {
   return start + (end - start) * t;
+}
+
+function stableNoise(seed) {
+  const raw = Math.sin(seed * 12.9898) * 43758.5453123;
+  return raw - Math.floor(raw);
 }
 
 function mod(value, base) {

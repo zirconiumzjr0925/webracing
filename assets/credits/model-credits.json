@@ -1,0 +1,74 @@
+[
+  {
+    "title": "Tree",
+    "creator": "Quaternius",
+    "license": "CC0 1.0",
+    "sourcePage": "https://poly.pizza/m/s8XdT4FOZz",
+    "localPath": "./assets/models/environment/tree.glb",
+    "usage": "外围树木"
+  },
+  {
+    "title": "Flower Bushes",
+    "creator": "Quaternius",
+    "license": "CC0 1.0",
+    "sourcePage": "https://poly.pizza/m/1X06RgvSr6",
+    "localPath": "./assets/models/environment/flower-bushes.glb",
+    "usage": "路边灌木"
+  },
+  {
+    "title": "Streetlight",
+    "creator": "Quaternius",
+    "license": "CC0 1.0",
+    "sourcePage": "https://poly.pizza/m/Bq1Qj4DAre",
+    "localPath": "./assets/models/environment/streetlight.glb",
+    "usage": "赛道路灯"
+  },
+  {
+    "title": "Barrier Large",
+    "creator": "Quaternius",
+    "license": "CC0 1.0",
+    "sourcePage": "https://poly.pizza/m/gLbBiYwt7l",
+    "localPath": "./assets/models/track/barrier-large.glb",
+    "usage": "护栏装饰"
+  },
+  {
+    "title": "Banner",
+    "creator": "Quaternius",
+    "license": "CC0 1.0",
+    "sourcePage": "https://poly.pizza/m/Kd94xlw5aj",
+    "localPath": "./assets/models/track/banner.glb",
+    "usage": "终点线横幅装饰"
+  },
+  {
+    "title": "Menu",
+    "creator": "Kay Lousberg",
+    "license": "CC0 1.0",
+    "sourcePage": "https://poly.pizza/m/94k5VptZZx",
+    "localPath": "./assets/models/props/menu-billboard.glb",
+    "usage": "广告牌"
+  },
+  {
+    "title": "Road Cone",
+    "creator": "smallbigsquare",
+    "license": "CC0 1.0",
+    "sourcePage": "https://poly.pizza/m/ZPhinXAGtY",
+    "localPath": "./assets/models/props/road-cone.glb",
+    "usage": "路锥"
+  },
+  {
+    "title": "Low Poly Sports Stands",
+    "creator": "Cole Brenner",
+    "license": "CC-BY 3.0",
+    "sourcePage": "https://poly.pizza/m/26j2bQ3zuUL",
+    "localPath": "./assets/models/props/sports-stands.glb",
+    "usage": "看台"
+  },
+  {
+    "title": "Race Flag",
+    "creator": "Zsky",
+    "license": "CC-BY 3.0",
+    "sourcePage": "https://poly.pizza/m/sOBfmF9nEY",
+    "localPath": "./assets/models/props/race-flag.glb",
+    "usage": "终点旗帜装饰"
+  }
+]
