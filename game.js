@@ -2935,9 +2935,10 @@ function resetCarToCheckpoint(car, noticeText) {
     return;
   }
 
-  car.mesh.position.copy(car.respawnState.position);
-  car.yaw = car.respawnState.yaw;
-  applyCarVisualTransform(car);
+  // 自动复位统一回到最近有效进度对应的赛道中心线，并按赛道前进方向回正。
+  const respawnFrame = getFrameAtProgress(gameState.track, car.respawnState.trackProgress);
+  car.mesh.position.copy(respawnFrame.position);
+  car.yaw = Math.atan2(respawnFrame.tangent.x, respawnFrame.tangent.z);
   car.velocity.set(0, 0, 0);
   car.steering = 0;
   car.wheelSpin = 0;
@@ -2957,6 +2958,8 @@ function resetCarToCheckpoint(car, noticeText) {
   car.wrongWayTime = 0;
   car.stuckTime = 0;
   car.trackProjection = projectPointToTrack(gameState.track, car.mesh.position);
+  car.trackProgress = car.trackProjection.progress;
+  car.absoluteProgress = car.completedLaps * gameState.track.totalLength + car.trackProjection.progress;
   applyCarVisualTransform(car);
 
   if (car.type === "player") {
