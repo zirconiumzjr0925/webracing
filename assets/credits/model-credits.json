@@ -70,5 +70,37 @@
     "sourcePage": "https://poly.pizza/m/sOBfmF9nEY",
     "localPath": "./assets/models/props/race-flag.glb",
     "usage": "终点旗帜装饰"
+  },
+  {
+    "title": "Sports Car",
+    "creator": "Quaternius",
+    "license": "CC0 1.0",
+    "sourcePage": "https://poly.pizza/m/1mkmFkAz5v",
+    "localPath": "./assets/models/cars/sports-silver.glb",
+    "usage": "玩家与 AI 赛车视觉层"
+  },
+  {
+    "title": "Sports Car",
+    "creator": "Quaternius",
+    "license": "CC0 1.0",
+    "sourcePage": "https://poly.pizza/m/OyqKvX9xNh",
+    "localPath": "./assets/models/cars/sports-orange.glb",
+    "usage": "玩家与 AI 赛车视觉层"
+  },
+  {
+    "title": "Car",
+    "creator": "Quaternius",
+    "license": "CC0 1.0",
+    "sourcePage": "https://poly.pizza/m/Cz6yDaUcM9",
+    "localPath": "./assets/models/cars/car-blue.glb",
+    "usage": "玩家与 AI 赛车视觉层"
+  },
+  {
+    "title": "Car",
+    "creator": "Quaternius",
+    "license": "CC0 1.0",
+    "sourcePage": "https://poly.pizza/m/unqqkULtRU",
+    "localPath": "./assets/models/cars/car-light-blue.glb",
+    "usage": "玩家与 AI 赛车视觉层"
   }
 ]

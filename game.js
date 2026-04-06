@@ -267,7 +267,37 @@ const MODEL_ASSET_CONFIG = {
     target: 5.2,
     doubleSide: true,
   },
+  sportsSilverCar: {
+    path: "./assets/models/cars/sports-silver.glb",
+    fit: "span",
+    target: 4.45,
+    kind: "car",
+    paintMaterials: ["White"],
+  },
+  sportsOrangeCar: {
+    path: "./assets/models/cars/sports-orange.glb",
+    fit: "span",
+    target: 4.45,
+    kind: "car",
+    paintMaterials: ["Orange", "DarkOrange"],
+  },
+  carBlueCar: {
+    path: "./assets/models/cars/car-blue.glb",
+    fit: "span",
+    target: 4.45,
+    kind: "car",
+    paintMaterials: ["Blue"],
+  },
+  carLightBlueCar: {
+    path: "./assets/models/cars/car-light-blue.glb",
+    fit: "span",
+    target: 4.45,
+    kind: "car",
+    paintMaterials: ["LightBlue"],
+  },
 };
+
+const CAR_MODEL_VARIANTS = ["sportsOrangeCar", "carBlueCar", "carLightBlueCar", "sportsSilverCar"];
 
 const inputState = {
   accelerate: false,
@@ -653,17 +683,7 @@ function createGhostSystem() {
     init() {
       this.ghostCar = createCar("ghost", 0x79d8ff, "幽灵车");
       this.ghostCar.mesh.visible = false;
-      this.ghostCar.mesh.traverse((child) => {
-        if (child.isMesh) {
-          child.material = child.material.clone();
-          child.material.transparent = true;
-          child.material.opacity = 0.34;
-          child.material.depthWrite = false;
-          if ("emissive" in child.material) {
-            child.material.emissive = new THREE.Color(0x234868);
-          }
-        }
-      });
+      modelSystem.applyCarMaterialState(this.ghostCar);
       gameState.scene.add(this.ghostCar.mesh);
     },
     prepareForRace() {
@@ -1055,7 +1075,9 @@ function createModelSystem() {
   return {
     loader: new GLTFLoader(),
     prototypes: new Map(),
+    registeredCars: new Set(),
     initPromise: null,
+    ready: false,
     init() {
       if (this.initPromise) {
         return this.initPromise;
@@ -1063,7 +1085,9 @@ function createModelSystem() {
 
       this.initPromise = this.loadAll()
         .then(() => {
+          this.ready = true;
           this.populateScene();
+          this.refreshRegisteredCars();
         })
         .catch((error) => {
           console.warn("本地模型资源初始化失败，将继续使用几何回退资源。", error);
@@ -1080,7 +1104,7 @@ function createModelSystem() {
           if (!source) {
             throw new Error(`模型 ${key} 没有可用场景节点`);
           }
-          this.prototypes.set(key, this.preparePrototype(source, config));
+          this.prototypes.set(key, this.preparePrototype(source, config, key));
         }),
       );
 
@@ -1096,7 +1120,11 @@ function createModelSystem() {
         this.loader.load(path, resolve, undefined, reject);
       });
     },
-    preparePrototype(source, config) {
+    preparePrototype(source, config, key) {
+      if (config.kind === "car") {
+        return this.prepareCarPrototype(source, config, key);
+      }
+
       const root = source.clone(true);
       const wrapper = new THREE.Group();
       wrapper.add(root);
@@ -1138,6 +1166,116 @@ function createModelSystem() {
 
       return wrapper;
     },
+    prepareCarPrototype(source, config, key) {
+      const root = source.clone(true);
+      const rig = new THREE.Group();
+      const meshNodes = [];
+
+      root.traverse((child) => {
+        if (child.isLight) {
+          child.visible = false;
+          return;
+        }
+
+        if (!child.isMesh) {
+          return;
+        }
+
+        child.castShadow = false;
+        child.receiveShadow = true;
+        child.geometry = child.geometry.clone();
+        this.centerMeshGeometry(child);
+        meshNodes.push(child);
+      });
+
+      const bodyMeshes = [];
+      let rearMesh = null;
+      let frontLeftMesh = null;
+      let frontRightMesh = null;
+
+      for (const mesh of meshNodes) {
+        mesh.removeFromParent();
+        const name = mesh.name.toLowerCase();
+
+        if (name.includes("frontleft")) {
+          frontLeftMesh = mesh;
+          continue;
+        }
+
+        if (name.includes("frontright")) {
+          frontRightMesh = mesh;
+          continue;
+        }
+
+        if (name.includes("backwheel") || name.includes("rearwheel")) {
+          rearMesh = mesh;
+          continue;
+        }
+
+        bodyMeshes.push(mesh);
+      }
+
+      bodyMeshes.forEach((mesh) => {
+        mesh.userData.visualRole = "body";
+        rig.add(mesh);
+      });
+
+      if (rearMesh) {
+        rig.add(this.createWheelRig(rearMesh, "rear-pair").root);
+      }
+      if (frontLeftMesh) {
+        rig.add(this.createWheelRig(frontLeftMesh, "front-left").root);
+      }
+      if (frontRightMesh) {
+        rig.add(this.createWheelRig(frontRightMesh, "front-right").root);
+      }
+
+      const wrapper = new THREE.Group();
+      wrapper.name = `${key}-wrapper`;
+      wrapper.add(rig);
+
+      const bounds = new THREE.Box3().setFromObject(wrapper);
+      const size = bounds.getSize(new THREE.Vector3());
+      const center = bounds.getCenter(new THREE.Vector3());
+      rig.position.x -= center.x;
+      rig.position.z -= center.z;
+      rig.position.y -= bounds.min.y;
+
+      const height = Math.max(size.y, 0.001);
+      const span = Math.max(size.x, size.z, 0.001);
+      const scaleFactor = config.fit === "span" ? config.target / span : config.target / height;
+      wrapper.scale.setScalar(scaleFactor);
+
+      return wrapper;
+    },
+    centerMeshGeometry(mesh) {
+      mesh.geometry.computeBoundingBox();
+      const center = mesh.geometry.boundingBox.getCenter(new THREE.Vector3());
+      mesh.geometry.translate(-center.x, -center.y, -center.z);
+      mesh.position.copy(center);
+    },
+    createWheelRig(mesh, role) {
+      const basePosition = mesh.position.clone();
+      const spinPivot = new THREE.Group();
+      spinPivot.name = `${role}-spin`;
+      spinPivot.userData.wheelRole = role;
+      spinPivot.userData.wheelKind = "spinPivot";
+      mesh.position.set(0, 0, 0);
+      spinPivot.add(mesh);
+
+      if (role.startsWith("front")) {
+        const steerPivot = new THREE.Group();
+        steerPivot.name = `${role}-steer`;
+        steerPivot.position.copy(basePosition);
+        steerPivot.userData.wheelRole = role;
+        steerPivot.userData.wheelKind = "steerPivot";
+        steerPivot.add(spinPivot);
+        return { root: steerPivot, steerPivot, spinPivot };
+      }
+
+      spinPivot.position.copy(basePosition);
+      return { root: spinPivot, steerPivot: null, spinPivot };
+    },
     clearGroup(group) {
       if (!group) {
         return;
@@ -1164,6 +1302,177 @@ function createModelSystem() {
         instance.rotation.y = options.rotationY;
       }
       return instance;
+    },
+    createCarInstance(key, color, type) {
+      const prototype = this.prototypes.get(key);
+      if (!prototype) {
+        return null;
+      }
+
+      const instanceRoot = prototype.clone(true);
+      const paintMaterialNames = new Set(MODEL_ASSET_CONFIG[key]?.paintMaterials ?? []);
+      const targetColor = new THREE.Color(color);
+
+      instanceRoot.traverse((child) => {
+        if (!child.isMesh) {
+          return;
+        }
+
+        const materials = Array.isArray(child.material)
+          ? child.material.map((material) => material.clone())
+          : [child.material.clone()];
+
+        child.material = Array.isArray(child.material) ? materials : materials[0];
+
+        for (const material of materials) {
+          if (!material) {
+            continue;
+          }
+
+          if (paintMaterialNames.has(material.name)) {
+            material.color.lerp(targetColor, type === "player" ? 0.82 : 0.68);
+            if ("emissive" in material && type === "player") {
+              material.emissive.copy(targetColor).multiplyScalar(0.12);
+            }
+          } else if (material.name === "Headlights") {
+            material.emissive = new THREE.Color(0xffd8a4);
+            material.emissiveIntensity = 0.35;
+          } else if (/TailLights/i.test(material.name)) {
+            material.emissive = new THREE.Color(0xff4b4b);
+            material.emissiveIntensity = 0.28;
+          }
+
+          this.captureMaterialState(material);
+        }
+      });
+
+      const controller = { front: [], rear: [] };
+      instanceRoot.traverse((child) => {
+        if (child.userData?.wheelKind !== "spinPivot") {
+          return;
+        }
+
+        const wheel = {
+          role: child.userData.wheelRole,
+          spinPivot: child,
+          steerPivot: child.parent?.userData?.wheelKind === "steerPivot" ? child.parent : null,
+        };
+
+        if (wheel.role.startsWith("front")) {
+          controller.front.push(wheel);
+        } else {
+          controller.rear.push(wheel);
+        }
+      });
+
+      return { root: instanceRoot, controller };
+    },
+    captureMaterialState(material) {
+      if (material.userData?.__carStateCaptured) {
+        return;
+      }
+
+      material.userData = {
+        ...material.userData,
+        __carStateCaptured: true,
+        baseTransparent: material.transparent,
+        baseOpacity: material.opacity,
+        baseDepthWrite: material.depthWrite,
+        baseColor: "color" in material ? material.color.getHex() : null,
+        baseEmissive: "emissive" in material ? material.emissive.getHex() : null,
+        baseEmissiveIntensity: "emissiveIntensity" in material ? material.emissiveIntensity : 1,
+      };
+    },
+    resetMaterialState(material) {
+      if (!material.userData?.__carStateCaptured) {
+        this.captureMaterialState(material);
+      }
+
+      material.transparent = material.userData.baseTransparent;
+      material.opacity = material.userData.baseOpacity;
+      material.depthWrite = material.userData.baseDepthWrite;
+
+      if ("color" in material && material.userData.baseColor !== null) {
+        material.color.setHex(material.userData.baseColor);
+      }
+
+      if ("emissive" in material && material.userData.baseEmissive !== null) {
+        material.emissive.setHex(material.userData.baseEmissive);
+      }
+
+      if ("emissiveIntensity" in material) {
+        material.emissiveIntensity = material.userData.baseEmissiveIntensity ?? 1;
+      }
+    },
+    registerCar(car) {
+      if (!car) {
+        return;
+      }
+
+      this.registeredCars.add(car);
+      if (this.ready) {
+        this.attachCarVisual(car);
+      }
+    },
+    refreshRegisteredCars() {
+      for (const car of this.registeredCars) {
+        this.attachCarVisual(car);
+      }
+    },
+    getCarModelKey(car) {
+      if (car.type === "player" || car.type === "ghost") {
+        return "sportsSilverCar";
+      }
+
+      return CAR_MODEL_VARIANTS[(car.id - 1) % CAR_MODEL_VARIANTS.length];
+    },
+    attachCarVisual(car) {
+      if (!car?.visualModelMount || !car?.fallbackVisual) {
+        return;
+      }
+
+      car.fallbackVisual.visible = true;
+      car.visualWheelController = car.fallbackWheelController;
+      car.visualModelKey = null;
+      this.clearGroup(car.visualModelMount);
+
+      const modelKey = this.getCarModelKey(car);
+      const instance = this.createCarInstance(modelKey, car.baseColor, car.type);
+      if (instance) {
+        car.fallbackVisual.visible = false;
+        car.visualModelMount.add(instance.root);
+        car.visualWheelController = instance.controller;
+        car.visualModelKey = modelKey;
+      }
+
+      this.applyCarMaterialState(car);
+      applyCarWheelPose(car);
+    },
+    applyCarMaterialState(car) {
+      const seen = new Set();
+      car.mesh.traverse((child) => {
+        if (!child.isMesh) {
+          return;
+        }
+
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        for (const material of materials) {
+          if (!material || seen.has(material)) {
+            continue;
+          }
+          seen.add(material);
+          this.resetMaterialState(material);
+
+          if (car.type === "ghost") {
+            material.transparent = true;
+            material.opacity = 0.34;
+            material.depthWrite = false;
+            if ("emissive" in material) {
+              material.emissive.setHex(0x234868);
+            }
+          }
+        }
+      });
     },
     createTrackPlacement(key, ratio, options = {}) {
       if (!gameState.track) {
@@ -1208,6 +1517,7 @@ function createModelSystem() {
 
       this.populateNature();
       this.populateTrackDecorations();
+      this.refreshRegisteredCars();
 
       if (this.hasPrototype("tree") && gameState.world.fallbackTreesGroup) {
         gameState.world.fallbackTreesGroup.visible = false;
@@ -1729,6 +2039,8 @@ function resolveCarCollisions() {
 function simulateCarPhysics(car, control, dt, physics) {
   if (car.finished) {
     car.velocity.multiplyScalar(Math.max(0, 1 - dt * 5));
+    updateCarVisualAnimation(car, dt);
+    applyCarVisualTransform(car);
     return;
   }
 
@@ -1842,6 +2154,7 @@ function simulateCarPhysics(car, control, dt, physics) {
 
   car.velocity.copy(forward).multiplyScalar(forwardSpeed).addScaledVector(right, lateralSpeed);
   car.mesh.position.addScaledVector(car.velocity, dt);
+  updateCarVisualAnimation(car, dt);
   applyCarVisualTransform(car);
 }
 
@@ -2412,9 +2725,25 @@ function buildSpawnSetups(totalCars) {
   return setups;
 }
 
-// 赛车模型使用简单几何体拼装，保证加载快且容易区分玩家与 AI。
-function createCar(type, color, label) {
-  const mesh = new THREE.Group();
+function createFallbackWheel(x, y, z) {
+  const steerPivot = new THREE.Group();
+  const spinPivot = new THREE.Group();
+  const wheel = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.46, 0.46, 0.4, 14),
+    new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.95 }),
+  );
+  wheel.rotation.z = Math.PI / 2;
+  steerPivot.position.set(x, y, z);
+  spinPivot.add(wheel);
+  steerPivot.add(spinPivot);
+  return { root: steerPivot, steerPivot, spinPivot };
+}
+
+// 车辆的物理根节点保持不变，外部模型只挂到可视层，确保比赛逻辑和碰撞半径不受影响。
+function createFallbackCarVisual(color) {
+  const group = new THREE.Group();
+  group.rotation.y = Math.PI;
+
   const body = new THREE.Mesh(
     new THREE.BoxGeometry(2.35, 0.82, 4.4),
     new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.18 }),
@@ -2433,31 +2762,58 @@ function createCar(type, color, label) {
   );
   spoiler.position.set(0, 1.1, 1.95);
 
-  mesh.add(body, cabin, spoiler);
+  const rearLeft = createFallbackWheel(-1.08, 0.42, -1.45);
+  const rearRight = createFallbackWheel(1.08, 0.42, -1.45);
+  const frontLeft = createFallbackWheel(-1.08, 0.42, 1.45);
+  const frontRight = createFallbackWheel(1.08, 0.42, 1.45);
 
-  const wheelGeometry = new THREE.CylinderGeometry(0.46, 0.46, 0.4, 14);
-  const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.95 });
-  const wheelOffsets = [
-    [-1.08, 0.42, -1.45],
-    [1.08, 0.42, -1.45],
-    [-1.08, 0.42, 1.45],
-    [1.08, 0.42, 1.45],
-  ];
-
-  for (const [x, y, z] of wheelOffsets) {
-    const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-    wheel.rotation.z = Math.PI / 2;
-    wheel.position.set(x, y, z);
-    mesh.add(wheel);
-  }
-
-  mesh.position.y = CONFIG.carBaseHeight;
+  group.add(
+    body,
+    cabin,
+    spoiler,
+    rearLeft.root,
+    rearRight.root,
+    frontLeft.root,
+    frontRight.root,
+  );
 
   return {
+    group,
+    controller: {
+      front: [
+        { role: "front-left", steerPivot: frontLeft.steerPivot, spinPivot: frontLeft.spinPivot },
+        { role: "front-right", steerPivot: frontRight.steerPivot, spinPivot: frontRight.spinPivot },
+      ],
+      rear: [
+        { role: "rear-left", steerPivot: null, spinPivot: rearLeft.spinPivot },
+        { role: "rear-right", steerPivot: null, spinPivot: rearRight.spinPivot },
+      ],
+    },
+  };
+}
+
+function createCar(type, color, label) {
+  const mesh = new THREE.Group();
+  const visualRoot = new THREE.Group();
+  const visualModelMount = new THREE.Group();
+  const fallbackVisual = createFallbackCarVisual(color);
+  visualRoot.add(fallbackVisual.group, visualModelMount);
+  mesh.add(visualRoot);
+  mesh.position.y = CONFIG.carBaseHeight;
+
+  const car = {
     id: carIdCounter++,
     type,
     label,
+    baseColor: color,
     mesh,
+    visualRoot,
+    visualModelMount,
+    fallbackVisual: fallbackVisual.group,
+    fallbackWheelController: fallbackVisual.controller,
+    visualWheelController: fallbackVisual.controller,
+    visualModelKey: null,
+    wheelSpin: 0,
     velocity: new THREE.Vector3(),
     yaw: 0,
     steering: 0,
@@ -2486,12 +2842,45 @@ function createCar(type, color, label) {
     aiSettings: null,
     physicsProfile: null,
   };
+
+  modelSystem.registerCar(car);
+  modelSystem.applyCarMaterialState(car);
+  return car;
 }
 
-// 车辆模型默认车头朝向与物理前进轴相反，这里统一做一次可视方向修正。
+function applyCarWheelPose(car) {
+  const controller = car.visualWheelController ?? car.fallbackWheelController;
+  if (!controller) {
+    return;
+  }
+
+  const steerAngle = clamp(-car.steering * 0.22, -0.48, 0.48);
+  for (const wheel of controller.front) {
+    if (wheel.steerPivot) {
+      wheel.steerPivot.rotation.y = steerAngle;
+    }
+    if (wheel.spinPivot) {
+      wheel.spinPivot.rotation.x = car.wheelSpin;
+    }
+  }
+
+  for (const wheel of controller.rear) {
+    if (wheel.spinPivot) {
+      wheel.spinPivot.rotation.x = car.wheelSpin;
+    }
+  }
+}
+
+function updateCarVisualAnimation(car, dt) {
+  const forwardSpeed = getForwardSpeed(car);
+  car.wheelSpin -= (forwardSpeed / 0.46) * dt;
+  applyCarWheelPose(car);
+}
+
 function applyCarVisualTransform(car) {
   car.mesh.position.y = CONFIG.carBaseHeight;
-  car.mesh.rotation.y = car.yaw + Math.PI;
+  car.mesh.rotation.y = car.yaw;
+  applyCarWheelPose(car);
 }
 
 function placeCarOnTrack(car, progress, laneOffset) {
@@ -2504,6 +2893,7 @@ function placeCarOnTrack(car, progress, laneOffset) {
   applyCarVisualTransform(car);
   car.velocity.set(0, 0, 0);
   car.steering = 0;
+  car.wheelSpin = 0;
   car.wasDrifting = false;
   car.driftCharge = 0;
   car.boostTimer = 0;
@@ -2525,6 +2915,7 @@ function placeCarOnTrack(car, progress, laneOffset) {
   car.trackProjection = projectPointToTrack(gameState.track, car.mesh.position);
   car.trackProgress = car.trackProjection.progress;
   car.absoluteProgress = car.trackProjection.progress;
+  applyCarVisualTransform(car);
   saveRespawnState(car);
 }
 
@@ -2549,6 +2940,7 @@ function resetCarToCheckpoint(car, noticeText) {
   applyCarVisualTransform(car);
   car.velocity.set(0, 0, 0);
   car.steering = 0;
+  car.wheelSpin = 0;
   car.driftCharge = 0;
   car.boostTimer = 0;
   car.itemBoostTimer = 0;
@@ -2565,6 +2957,7 @@ function resetCarToCheckpoint(car, noticeText) {
   car.wrongWayTime = 0;
   car.stuckTime = 0;
   car.trackProjection = projectPointToTrack(gameState.track, car.mesh.position);
+  applyCarVisualTransform(car);
 
   if (car.type === "player") {
     setNotice(noticeText, 1.4);

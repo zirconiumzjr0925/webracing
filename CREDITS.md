@@ -22,6 +22,10 @@
 | 路锥 | Road Cone | smallbigsquare | CC0 1.0 | `./assets/models/props/road-cone.glb` | [Poly Pizza](https://poly.pizza/m/ZPhinXAGtY) |
 | 看台 | Low Poly Sports Stands | Cole Brenner | CC-BY 3.0 | `./assets/models/props/sports-stands.glb` | [Poly Pizza](https://poly.pizza/m/26j2bQ3zuUL) |
 | 终点旗帜 | Race Flag | Zsky | CC-BY 3.0 | `./assets/models/props/race-flag.glb` | [Poly Pizza](https://poly.pizza/m/sOBfmF9nEY) |
+| 玩家与 AI 赛车 | Sports Car | Quaternius | CC0 1.0 | `./assets/models/cars/sports-silver.glb` | [Poly Pizza](https://poly.pizza/m/1mkmFkAz5v) |
+| 玩家与 AI 赛车 | Sports Car | Quaternius | CC0 1.0 | `./assets/models/cars/sports-orange.glb` | [Poly Pizza](https://poly.pizza/m/OyqKvX9xNh) |
+| 玩家与 AI 赛车 | Car | Quaternius | CC0 1.0 | `./assets/models/cars/car-blue.glb` | [Poly Pizza](https://poly.pizza/m/Cz6yDaUcM9) |
+| 玩家与 AI 赛车 | Car | Quaternius | CC0 1.0 | `./assets/models/cars/car-light-blue.glb` | [Poly Pizza](https://poly.pizza/m/unqqkULtRU) |
 
 ## 需要署名的资源
 
