@@ -115,6 +115,61 @@
                 </button>
               </div>
             </div>
+            <div id="online-section" class="difficulty-section start-section online-section">
+              <div class="difficulty-header">
+                <h2>在线模式</h2>
+                <p id="online-description" class="difficulty-description">
+                  使用 Cloudflare 在线服务可创建房间、查看在线排行榜并开启轻量联机竞速。
+                </p>
+              </div>
+              <div class="mode-options">
+                <button class="difficulty-option mode-option active" type="button" data-mode="local">
+                  <strong>单机</strong>
+                  <span>保留 AI 与本地记录</span>
+                </button>
+                <button class="difficulty-option mode-option" type="button" data-mode="online">
+                  <strong>在线</strong>
+                  <span>创建房间，与其他玩家实时竞速</span>
+                </button>
+              </div>
+              <div id="online-controls" class="online-controls hidden">
+                <div class="online-field-grid">
+                  <label class="input-field" for="online-name-input">
+                    <span>昵称</span>
+                    <input id="online-name-input" class="text-input" type="text" maxlength="18" placeholder="输入你的昵称" />
+                  </label>
+                  <label class="input-field" for="online-api-input">
+                    <span>在线服务地址</span>
+                    <input id="online-api-input" class="text-input" type="text" placeholder="/api 或 https://你的服务域名/api" />
+                  </label>
+                </div>
+                <div class="online-room-row">
+                  <button id="create-room-button" class="secondary-button" type="button">创建房间</button>
+                  <input id="online-room-input" class="text-input room-code-input" type="text" maxlength="8" placeholder="输入房间码" />
+                  <button id="join-room-button" class="secondary-button" type="button">加入房间</button>
+                  <button id="leave-room-button" class="secondary-button secondary-button-soft" type="button">离开房间</button>
+                </div>
+                <div class="online-meta-grid">
+                  <div class="hud-detail-block">
+                    <span class="hud-metric-label">房间码</span>
+                    <strong id="online-room-code-value" class="hud-detail-value">未加入</strong>
+                  </div>
+                  <div class="hud-detail-block">
+                    <span class="hud-metric-label">房间身份</span>
+                    <strong id="online-room-role-value" class="hud-detail-value">单机</strong>
+                  </div>
+                </div>
+                <p id="online-status" class="online-status">单机模式下不会连接在线服务。</p>
+                <div class="mini-leaderboard-section">
+                  <h3>在线排行榜</h3>
+                  <ul id="online-leaderboard-list" class="mini-leaderboard-list compact-leaderboard"></ul>
+                </div>
+                <div class="mini-leaderboard-section">
+                  <h3>房间成员</h3>
+                  <ul id="online-room-members" class="mini-leaderboard-list compact-leaderboard online-room-members"></ul>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -146,6 +201,14 @@
         </div>
       </div>
       <div class="hud-chip-row">
+        <span class="hud-chip">
+          模式
+          <strong id="mode-value">单机</strong>
+        </span>
+        <span class="hud-chip">
+          房间
+          <strong id="room-value">无</strong>
+        </span>
         <span class="hud-chip">
           赛道
           <strong id="track-value">霓虹环线</strong>
@@ -232,6 +295,11 @@
       <div class="record-board history-board">
         <h3>本地排行榜</h3>
         <ul id="history-list" class="mini-leaderboard-list"></ul>
+      </div>
+      <div class="record-board history-board">
+        <h3>在线排行榜</h3>
+        <p id="online-result-status" class="record-line">在线成绩尚未同步。</p>
+        <ul id="online-result-list" class="mini-leaderboard-list"></ul>
       </div>
       <button id="restart-button" class="primary-button" type="button">重新开始</button>
     </div>

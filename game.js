@@ -45,6 +45,14 @@ const CONFIG = {
     storageKey: "neon-bend-rush-save-v1",
     leaderboardLimit: 10,
   },
+  online: {
+    storageKey: "neon-bend-rush-online-v1",
+    defaultApiBase: "https://neon-bend-rush-service.zirconiumzjr.workers.dev/api",
+    leaderboardLimit: 5,
+    stateSendInterval: 1 / 12,
+    remoteLerpSharpness: 10,
+    roomCodeLength: 5,
+  },
   trackDefaults: {
     wallHeight: 1.8,
     checkpointCount: 6,
@@ -379,9 +387,26 @@ const ui = {
   difficultyValue: document.getElementById("difficulty-value"),
   weatherValue: document.getElementById("weather-value"),
   trackValue: document.getElementById("track-value"),
+  modeValue: document.getElementById("mode-value"),
+  roomValue: document.getElementById("room-value"),
   statusValue: document.getElementById("status-value"),
   trackDescription: document.getElementById("track-description"),
   trackButtons: [...document.querySelectorAll("[data-track]")],
+  onlineSection: document.getElementById("online-section"),
+  onlineDescription: document.getElementById("online-description"),
+  modeButtons: [...document.querySelectorAll("[data-mode]")],
+  onlineControls: document.getElementById("online-controls"),
+  onlineNameInput: document.getElementById("online-name-input"),
+  onlineApiInput: document.getElementById("online-api-input"),
+  onlineRoomInput: document.getElementById("online-room-input"),
+  createRoomButton: document.getElementById("create-room-button"),
+  joinRoomButton: document.getElementById("join-room-button"),
+  leaveRoomButton: document.getElementById("leave-room-button"),
+  onlineRoomCodeValue: document.getElementById("online-room-code-value"),
+  onlineRoomRoleValue: document.getElementById("online-room-role-value"),
+  onlineStatus: document.getElementById("online-status"),
+  onlineLeaderboardList: document.getElementById("online-leaderboard-list"),
+  onlineRoomMembers: document.getElementById("online-room-members"),
   hudSupportText: document.querySelector("#hud-time-card .hud-support-text"),
   minimapPanel: document.getElementById("minimap-panel"),
   minimapCanvas: document.getElementById("minimap-canvas"),
@@ -399,6 +424,8 @@ const ui = {
   resultList: document.getElementById("result-list"),
   lapTimeList: document.getElementById("lap-time-list"),
   historyList: document.getElementById("history-list"),
+  onlineResultStatus: document.getElementById("online-result-status"),
+  onlineResultList: document.getElementById("online-result-list"),
   recordBestTotal: document.getElementById("record-best-total"),
   recordBestLap: document.getElementById("record-best-lap"),
   recordFlags: document.getElementById("record-flags"),
@@ -430,9 +457,11 @@ const gameState = {
   world: {},
   player: null,
   aiCars: [],
+  remoteCars: [],
   cars: [],
   standings: [],
   currentCameraIndex: 0,
+  selectedModeId: "local",
   selectedDifficultyId: "expert",
   difficultyConfig: null,
   selectedWeatherId: "day",
@@ -472,6 +501,7 @@ const debugPanel = createDebugPanel();
 const modelSystem = createModelSystem();
 const minimapSystem = createMiniMapSystem();
 const soundSystem = createSoundSystem();
+const onlineSystem = createOnlineSystem();
 
 boot();
 
@@ -491,6 +521,7 @@ function boot() {
   ghostSystem.init();
   debugPanel.init();
   minimapSystem.init();
+  onlineSystem.init();
   saveSystem.renderBoards();
   resetRace();
   renderHUD();
@@ -579,6 +610,12 @@ function setupTrackAndCars() {
 }
 
 function setupUI() {
+  for (const button of ui.modeButtons) {
+    button.addEventListener("click", () => {
+      onlineSystem.applyMode(button.dataset.mode);
+    });
+  }
+
   for (const button of ui.trackButtons) {
     button.addEventListener("click", () => {
       applyTrackSelection(button.dataset.track);
@@ -599,6 +636,11 @@ function setupUI() {
 
   ui.startButton.addEventListener("click", () => {
     soundSystem.init();
+    if (onlineSystem.isOnlineMode()) {
+      onlineSystem.handleStartButton();
+      return;
+    }
+
     ui.startScreen.classList.remove("visible");
     ui.startScreen.classList.add("hidden");
     startCountdown();
@@ -608,6 +650,13 @@ function setupUI() {
     soundSystem.init();
     ui.resultScreen.classList.remove("visible");
     ui.resultScreen.classList.add("hidden");
+    if (onlineSystem.isOnlineMode()) {
+      ui.hud.classList.add("hidden");
+      ui.startScreen.classList.remove("hidden");
+      ui.startScreen.classList.add("visible");
+      onlineSystem.afterRaceReturnToLobby();
+      return;
+    }
     startCountdown();
   });
 
@@ -626,6 +675,7 @@ function applyDifficultySelection(difficultyId) {
   }
 
   renderHUD();
+  onlineSystem.refreshLeaderboard();
 }
 
 function getSelectedTrackConfig(trackId) {
@@ -654,6 +704,7 @@ function applyTrackSelection(trackId) {
 
   renderHUD();
   saveSystem.renderBoards();
+  onlineSystem.refreshLeaderboard();
 }
 
 function applyWeatherSelection(weatherId) {
@@ -854,6 +905,797 @@ function createSaveSystem() {
   };
 }
 
+function createOnlineSystem() {
+  return {
+    socket: null,
+    room: {
+      apiBase: CONFIG.online.defaultApiBase,
+      roomId: "",
+      playerId: "",
+      hostId: "",
+      players: [],
+      status: "idle",
+      connected: false,
+      isHost: false,
+      config: null,
+    },
+    onlineEntries: [],
+    submitStatus: "在线成绩尚未同步。",
+    sendAccumulator: 0,
+    remotePalette: [0xb08cff, 0x7ed0ff, 0xffa16b, 0x7af0c3, 0xff7fb2],
+    init() {
+      this.loadPreferences();
+      this.bindControls();
+      this.applyMode(gameState.selectedModeId);
+      this.renderRoomMembers();
+      this.renderLeaderboardLists();
+      this.renderResultBoard();
+      this.refreshLeaderboard();
+      this.updateSelectionLocks();
+      this.updateStartButtonState();
+    },
+    bindControls() {
+      ui.onlineNameInput?.addEventListener("change", () => {
+        ui.onlineNameInput.value = this.getPlayerName();
+        this.savePreferences();
+      });
+
+      ui.onlineApiInput?.addEventListener("change", () => {
+        ui.onlineApiInput.value = this.normalizeApiBase(ui.onlineApiInput.value);
+        this.savePreferences();
+        this.refreshLeaderboard();
+      });
+
+      ui.createRoomButton?.addEventListener("click", () => {
+        this.createRoom();
+      });
+
+      ui.joinRoomButton?.addEventListener("click", () => {
+        this.joinRoom();
+      });
+
+      ui.leaveRoomButton?.addEventListener("click", () => {
+        this.leaveRoom(true);
+      });
+    },
+    loadPreferences() {
+      const fallbackName = `玩家${Math.floor(100 + Math.random() * 900)}`;
+      try {
+        const raw = window.localStorage.getItem(CONFIG.online.storageKey);
+        if (!raw) {
+          if (ui.onlineNameInput) {
+            ui.onlineNameInput.value = fallbackName;
+          }
+          if (ui.onlineApiInput) {
+            ui.onlineApiInput.value = this.normalizeApiBase(CONFIG.online.defaultApiBase);
+          }
+          return;
+        }
+
+        const parsed = JSON.parse(raw);
+        const storedApiBase = this.normalizeApiBase(parsed.apiBase || CONFIG.online.defaultApiBase);
+        const migratedApiBase = storedApiBase === "/api" ? CONFIG.online.defaultApiBase : storedApiBase;
+        if (ui.onlineNameInput) {
+          ui.onlineNameInput.value = sanitizePlayerName(parsed.playerName || fallbackName);
+        }
+        if (ui.onlineApiInput) {
+          ui.onlineApiInput.value = this.normalizeApiBase(migratedApiBase);
+        }
+      } catch {
+        if (ui.onlineNameInput) {
+          ui.onlineNameInput.value = fallbackName;
+        }
+        if (ui.onlineApiInput) {
+          ui.onlineApiInput.value = this.normalizeApiBase(CONFIG.online.defaultApiBase);
+        }
+      }
+    },
+    savePreferences() {
+      try {
+        window.localStorage.setItem(
+          CONFIG.online.storageKey,
+          JSON.stringify({
+            playerName: this.getPlayerName(),
+            apiBase: this.normalizeApiBase(ui.onlineApiInput?.value || CONFIG.online.defaultApiBase),
+          }),
+        );
+      } catch {
+        // 本地缓存昵称或接口地址失败时，不影响单机和在线主流程。
+      }
+    },
+    normalizeApiBase(value) {
+      const trimmed = String(value || CONFIG.online.defaultApiBase).trim();
+      if (!trimmed) {
+        return CONFIG.online.defaultApiBase;
+      }
+      return trimmed.replace(/\/+$/, "");
+    },
+    getPlayerName() {
+      return sanitizePlayerName(ui.onlineNameInput?.value || "玩家");
+    },
+    getRoomCodeInput() {
+      return String(ui.onlineRoomInput?.value || "")
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "")
+        .slice(0, 8);
+    },
+    isOnlineMode() {
+      return gameState.selectedModeId === "online";
+    },
+    applyMode(modeId) {
+      const nextMode = modeId === "online" ? "online" : "local";
+      if (gameState.selectedModeId === "online" && nextMode === "local" && (this.room.connected || this.room.roomId)) {
+        this.leaveRoom(false);
+      }
+
+      gameState.selectedModeId = nextMode;
+      for (const button of ui.modeButtons) {
+        button.classList.toggle("active", button.dataset.mode === nextMode);
+      }
+
+      ui.onlineControls?.classList.toggle("hidden", nextMode !== "online");
+      if (ui.onlineSection) {
+        ui.onlineSection.dataset.mode = nextMode;
+      }
+
+      if (nextMode === "online") {
+        this.setStatus(
+          this.room.connected
+            ? `已连接房间 ${this.room.roomId}，${this.room.isHost ? "你是房主" : "等待房主开始"}。`
+            : "在线模式已启用，请先创建或加入房间。",
+        );
+      } else {
+        this.setStatus("单机模式下不会连接在线服务。");
+      }
+
+      this.updateSelectionLocks();
+      this.updateStartButtonState();
+      renderHUD();
+    },
+    updateSelectionLocks() {
+      const locked = this.isOnlineMode() && this.room.connected && !this.room.isHost;
+      [...ui.difficultyButtons, ...ui.trackButtons, ...ui.weatherButtons].forEach((button) => {
+        if (!button) {
+          return;
+        }
+        button.disabled = locked;
+        button.title = locked ? "只有房主可以修改房间配置" : "";
+      });
+    },
+    updateStartButtonState() {
+      if (!ui.startButton) {
+        return;
+      }
+
+      if (!this.isOnlineMode()) {
+        ui.startButton.disabled = false;
+        ui.startButton.textContent = "开始游戏";
+        return;
+      }
+
+      if (!this.room.connected) {
+        ui.startButton.disabled = true;
+        ui.startButton.textContent = "先加入房间";
+        return;
+      }
+
+      if (!this.room.isHost) {
+        ui.startButton.disabled = true;
+        ui.startButton.textContent = "等待房主开始";
+        return;
+      }
+
+      ui.startButton.disabled = false;
+      ui.startButton.textContent = "开始在线比赛";
+    },
+    updateRoomMeta() {
+      if (ui.onlineRoomCodeValue) {
+        ui.onlineRoomCodeValue.textContent = this.room.roomId || "未加入";
+      }
+      if (ui.onlineRoomRoleValue) {
+        ui.onlineRoomRoleValue.textContent = this.isOnlineMode()
+          ? this.room.connected
+            ? this.room.isHost
+              ? "房主"
+              : "成员"
+            : "未连接"
+          : "单机";
+      }
+      renderHUD();
+    },
+    setStatus(text) {
+      if (ui.onlineStatus) {
+        ui.onlineStatus.textContent = text;
+      }
+    },
+    buildApiUrl(pathname, params = null) {
+      const base = this.normalizeApiBase(ui.onlineApiInput?.value || this.room.apiBase || CONFIG.online.defaultApiBase);
+      const url = new URL(base, window.location.href);
+      url.pathname = `${url.pathname.replace(/\/+$/, "")}/${pathname.replace(/^\/+/, "")}`;
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null && value !== "") {
+            url.searchParams.set(key, String(value));
+          }
+        });
+      }
+      return url;
+    },
+    buildWebSocketUrl(roomId, playerId) {
+      const url = this.buildApiUrl(`rooms/${roomId}/ws`, { playerId });
+      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+      return url;
+    },
+    async requestJson(pathname, options = {}) {
+      const url = this.buildApiUrl(pathname, options.query);
+      const response = await fetch(url, {
+        method: options.method || "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(options.headers || {}),
+        },
+        body: options.body ? JSON.stringify(options.body) : undefined,
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok || payload?.success === false) {
+        const message = payload?.error || payload?.errors?.[0]?.message || `请求失败（${response.status}）`;
+        throw new Error(message);
+      }
+
+      return payload;
+    },
+    async refreshLeaderboard() {
+      const shouldFetch = this.isOnlineMode() || this.normalizeApiBase(ui.onlineApiInput?.value || "").length > 0;
+      if (!shouldFetch) {
+        this.onlineEntries = [];
+        this.renderLeaderboardLists();
+        return;
+      }
+
+      try {
+        const payload = await this.requestJson("leaderboard", {
+          query: {
+            trackId: gameState.selectedTrackId,
+            difficultyId: gameState.selectedDifficultyId,
+            limit: CONFIG.online.leaderboardLimit,
+          },
+        });
+        this.onlineEntries = Array.isArray(payload.entries) ? payload.entries : [];
+        this.renderLeaderboardLists();
+        if (this.isOnlineMode()) {
+          this.setStatus(this.room.connected ? ui.onlineStatus.textContent : "在线排行榜已刷新，可创建或加入房间。");
+        }
+      } catch (error) {
+        this.onlineEntries = [];
+        this.renderLeaderboardLists();
+        if (this.isOnlineMode()) {
+          this.setStatus(`在线服务不可用：${error.message}`);
+        }
+      }
+    },
+    renderLeaderboardLists() {
+      const renderList = (targetList) => {
+        if (!targetList) {
+          return;
+        }
+
+        targetList.innerHTML = "";
+        if (this.onlineEntries.length === 0) {
+          const item = document.createElement("li");
+          item.className = "mini-leaderboard-item";
+          item.textContent = "暂无在线记录";
+          targetList.appendChild(item);
+          return;
+        }
+
+        this.onlineEntries.forEach((entry, index) => {
+          const item = document.createElement("li");
+          item.className = "mini-leaderboard-item";
+
+          const main = document.createElement("div");
+          main.className = "mini-leaderboard-main";
+
+          const title = document.createElement("strong");
+          title.textContent = `#${index + 1} ${entry.playerName || "匿名车手"}`;
+
+          const meta = document.createElement("span");
+          meta.textContent = `${formatTime(entry.totalTime)} · ${entry.trackLabel || gameState.trackConfig?.label || "赛道"}`;
+
+          const tag = document.createElement("span");
+          tag.className = "mini-leaderboard-tag";
+          tag.textContent = entry.bestLap ? `单圈 ${formatTime(entry.bestLap)}` : "完赛";
+
+          main.append(title, meta);
+          item.append(main, tag);
+          targetList.appendChild(item);
+        });
+      };
+
+      renderList(ui.onlineLeaderboardList);
+      renderList(ui.onlineResultList);
+    },
+    renderRoomMembers() {
+      if (!ui.onlineRoomMembers) {
+        return;
+      }
+
+      ui.onlineRoomMembers.innerHTML = "";
+      if (!this.room.connected || this.room.players.length === 0) {
+        const item = document.createElement("li");
+        item.className = "mini-leaderboard-item";
+        item.textContent = "未连接房间";
+        ui.onlineRoomMembers.appendChild(item);
+        return;
+      }
+
+      const orderedPlayers = [...this.room.players].sort((left, right) => left.slotIndex - right.slotIndex);
+      orderedPlayers.forEach((player) => {
+        const item = document.createElement("li");
+        item.className = "mini-leaderboard-item";
+
+        const main = document.createElement("div");
+        main.className = "mini-leaderboard-main";
+
+        const title = document.createElement("strong");
+        title.textContent = player.id === this.room.playerId ? `${player.name}（你）` : player.name;
+
+        const meta = document.createElement("span");
+        meta.textContent = player.connected ? "已在线" : "暂时离线";
+
+        const tag = document.createElement("span");
+        tag.className = "mini-leaderboard-tag";
+        tag.textContent = player.id === this.room.hostId ? "房主" : `席位 ${player.slotIndex + 1}`;
+
+        main.append(title, meta);
+        item.append(main, tag);
+        ui.onlineRoomMembers.appendChild(item);
+      });
+    },
+    async createRoom() {
+      this.applyMode("online");
+      this.savePreferences();
+      this.setStatus("正在创建房间...");
+
+      try {
+        const payload = await this.requestJson("rooms", {
+          method: "POST",
+          body: {
+            playerName: this.getPlayerName(),
+          },
+        });
+        this.acceptJoinPayload(payload);
+        await this.connectSocket();
+        this.setStatus(`房间 ${this.room.roomId} 创建成功，等待其他玩家加入。`);
+      } catch (error) {
+        this.setStatus(`创建房间失败：${error.message}`);
+      }
+    },
+    async joinRoom() {
+      this.applyMode("online");
+      this.savePreferences();
+      const roomId = this.getRoomCodeInput();
+      if (!roomId) {
+        this.setStatus("请输入有效房间码。");
+        return;
+      }
+
+      this.setStatus(`正在加入房间 ${roomId}...`);
+      try {
+        const payload = await this.requestJson("rooms/join", {
+          method: "POST",
+          body: {
+            roomId,
+            playerName: this.getPlayerName(),
+          },
+        });
+        this.acceptJoinPayload(payload);
+        await this.connectSocket();
+        this.setStatus(`已加入房间 ${this.room.roomId}，等待房主开始。`);
+      } catch (error) {
+        this.setStatus(`加入房间失败：${error.message}`);
+      }
+    },
+    acceptJoinPayload(payload) {
+      this.room.apiBase = this.normalizeApiBase(ui.onlineApiInput?.value || CONFIG.online.defaultApiBase);
+      this.room.roomId = payload.roomId || payload.room?.roomId || "";
+      this.room.playerId = payload.playerId || payload.player?.id || "";
+      this.applyRoomSnapshot(payload.room || null);
+      if (ui.onlineRoomInput) {
+        ui.onlineRoomInput.value = this.room.roomId;
+      }
+      this.updateRoomMeta();
+      this.updateSelectionLocks();
+      this.updateStartButtonState();
+      this.renderRoomMembers();
+    },
+    async connectSocket() {
+      if (!this.room.roomId || !this.room.playerId) {
+        throw new Error("缺少房间信息");
+      }
+
+      this.disconnectSocket();
+      const socket = new WebSocket(this.buildWebSocketUrl(this.room.roomId, this.room.playerId));
+      this.socket = socket;
+
+      socket.addEventListener("message", (event) => {
+        if (this.socket !== socket) {
+          return;
+        }
+        this.handleSocketMessage(event.data);
+      });
+      socket.addEventListener("close", () => {
+        if (this.socket !== socket) {
+          return;
+        }
+        this.socket = null;
+        this.room.connected = false;
+        this.room.players = this.room.players.map((player) => ({
+          ...player,
+          connected: false,
+        }));
+        this.clearRemoteCars();
+        this.renderRoomMembers();
+        this.updateRoomMeta();
+        this.updateStartButtonState();
+        if (this.isOnlineMode()) {
+          this.setStatus("与房间的实时连接已断开。");
+        }
+      });
+
+      await new Promise((resolve, reject) => {
+        const handleOpen = () => {
+          socket.removeEventListener("error", handleError);
+          resolve();
+        };
+        const handleError = () => {
+          socket.removeEventListener("open", handleOpen);
+          reject(new Error("WebSocket 连接失败"));
+        };
+        socket.addEventListener("open", handleOpen, { once: true });
+        socket.addEventListener("error", handleError, { once: true });
+      });
+
+      this.room.connected = true;
+      this.updateRoomMeta();
+      this.updateStartButtonState();
+    },
+    disconnectSocket() {
+      const socket = this.socket;
+      this.socket = null;
+      if (socket) {
+        try {
+          socket.close();
+        } catch {
+          // 关闭连接失败时直接释放本地引用即可。
+        }
+      }
+    },
+    handleSocketMessage(rawData) {
+      let message = null;
+      try {
+        message = JSON.parse(rawData);
+      } catch {
+        return;
+      }
+
+      if (!message || typeof message !== "object") {
+        return;
+      }
+
+      if (message.type === "snapshot") {
+        this.applyRoomSnapshot(message.room || null);
+        this.renderRoomMembers();
+        this.updateSelectionLocks();
+        this.updateStartButtonState();
+        return;
+      }
+
+      if (message.type === "player_state") {
+        this.applyRemoteState(message.playerId, message.state);
+        return;
+      }
+
+      if (message.type === "race_started") {
+        this.handleRaceStarted(message);
+      }
+    },
+    applyRoomSnapshot(roomSnapshot) {
+      if (!roomSnapshot) {
+        return;
+      }
+
+      this.room.roomId = roomSnapshot.roomId || this.room.roomId;
+      this.room.hostId = roomSnapshot.hostId || this.room.hostId;
+      this.room.players = Array.isArray(roomSnapshot.players) ? roomSnapshot.players : this.room.players;
+      this.room.status = roomSnapshot.status || this.room.status;
+      this.room.config = roomSnapshot.config || this.room.config;
+      this.room.connected = true;
+      this.room.isHost = this.room.hostId === this.room.playerId;
+      this.syncRemoteCars();
+      this.updateRoomMeta();
+    },
+    syncRemoteCars() {
+      const remoteIds = new Set();
+      for (const player of this.room.players) {
+        if (player.id === this.room.playerId || !player.connected) {
+          continue;
+        }
+        remoteIds.add(player.id);
+        let remoteCar = gameState.remoteCars.find((car) => car.onlinePlayerId === player.id);
+        if (!remoteCar) {
+          const color = this.remotePalette[gameState.remoteCars.length % this.remotePalette.length];
+          remoteCar = createCar("remote", color, `${player.name} 联机`);
+          remoteCar.onlinePlayerId = player.id;
+          remoteCar.onlineSlotIndex = player.slotIndex ?? gameState.remoteCars.length;
+          remoteCar.networkTargetPosition = remoteCar.mesh.position.clone();
+          remoteCar.networkTargetYaw = remoteCar.yaw;
+          gameState.remoteCars.push(remoteCar);
+          gameState.scene.add(remoteCar.mesh);
+        }
+        remoteCar.label = player.name;
+        remoteCar.onlineSlotIndex = player.slotIndex ?? remoteCar.onlineSlotIndex ?? 0;
+      }
+
+      for (const remoteCar of [...gameState.remoteCars]) {
+        if (!remoteIds.has(remoteCar.onlinePlayerId)) {
+          gameState.scene.remove(remoteCar.mesh);
+          gameState.remoteCars = gameState.remoteCars.filter((car) => car !== remoteCar);
+        }
+      }
+    },
+    clearRemoteCars() {
+      for (const remoteCar of gameState.remoteCars) {
+        gameState.scene.remove(remoteCar.mesh);
+      }
+      gameState.remoteCars = [];
+      computeRanking();
+    },
+    async handleStartButton() {
+      if (!this.room.connected) {
+        this.setStatus("请先创建或加入房间。");
+        return;
+      }
+
+      if (!this.room.isHost) {
+        this.setStatus("只有房主可以开始比赛，请等待房主操作。");
+        return;
+      }
+
+      try {
+        await this.requestJson("rooms/start", {
+          method: "POST",
+          body: {
+            roomId: this.room.roomId,
+            playerId: this.room.playerId,
+            config: {
+              trackId: gameState.selectedTrackId,
+              difficultyId: gameState.selectedDifficultyId,
+              weatherId: gameState.selectedWeatherId,
+            },
+          },
+        });
+        this.setStatus("已向房间发送开始指令。");
+      } catch (error) {
+        this.setStatus(`开始联机比赛失败：${error.message}`);
+      }
+    },
+    handleRaceStarted(message) {
+      if (!message?.config) {
+        return;
+      }
+
+      applyDifficultySelection(message.config.difficultyId || gameState.selectedDifficultyId);
+      applyTrackSelection(message.config.trackId || gameState.selectedTrackId);
+      weatherSystem.apply(message.config.weatherId || gameState.selectedWeatherId);
+      this.room.config = message.config;
+      if (message.room) {
+        this.applyRoomSnapshot(message.room);
+      }
+
+      ui.resultScreen.classList.remove("visible");
+      ui.resultScreen.classList.add("hidden");
+      ui.startScreen.classList.remove("visible");
+      ui.startScreen.classList.add("hidden");
+      ui.hud.classList.remove("hidden");
+      this.submitStatus = "比赛进行中，等待完赛后同步在线成绩。";
+      startCountdown();
+    },
+    prepareRoomRace() {
+      if (!this.isOnlineMode() || !this.room.connected || this.room.players.length === 0) {
+        return;
+      }
+
+      const orderedPlayers = [...this.room.players].sort((left, right) => left.slotIndex - right.slotIndex);
+      const spawnSetups = buildSpawnSetups(orderedPlayers.length);
+      const selfPlayer = orderedPlayers.find((player) => player.id === this.room.playerId);
+      if (selfPlayer) {
+        const spawn = spawnSetups[selfPlayer.slotIndex] ?? spawnSetups[0];
+        placeCarOnTrack(gameState.player, spawn.progress, spawn.laneOffset);
+      }
+
+      for (const remoteCar of gameState.remoteCars) {
+        const remotePlayer = orderedPlayers.find((player) => player.id === remoteCar.onlinePlayerId);
+        if (!remotePlayer) {
+          continue;
+        }
+        const spawn = spawnSetups[remotePlayer.slotIndex] ?? spawnSetups[0];
+        placeCarOnTrack(remoteCar, spawn.progress, spawn.laneOffset);
+        remoteCar.networkTargetPosition = remoteCar.mesh.position.clone();
+        remoteCar.networkTargetYaw = remoteCar.yaw;
+      }
+
+      computeRanking();
+    },
+    update(dt) {
+      if (!this.isOnlineMode()) {
+        return;
+      }
+
+      this.updateRemoteCars(dt);
+
+      if (!this.room.connected || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      if (gameState.status !== "running") {
+        return;
+      }
+
+      this.sendAccumulator += dt;
+      if (this.sendAccumulator < CONFIG.online.stateSendInterval) {
+        return;
+      }
+
+      this.sendAccumulator = 0;
+      this.sendPlayerState();
+    },
+    sendPlayerState() {
+      if (!gameState.player || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      this.socket.send(
+        JSON.stringify({
+          type: "state",
+          state: {
+            x: gameState.player.mesh.position.x,
+            y: gameState.player.mesh.position.y,
+            z: gameState.player.mesh.position.z,
+            yaw: gameState.player.yaw,
+            speed: getForwardSpeed(gameState.player),
+            completedLaps: gameState.player.completedLaps,
+            nextCheckpointIndex: gameState.player.nextCheckpointIndex,
+            trackProgress: gameState.player.trackProgress,
+            absoluteProgress: gameState.player.absoluteProgress,
+            finished: gameState.player.finished,
+            finishTime: gameState.player.finishTime,
+          },
+        }),
+      );
+    },
+    applyRemoteState(playerId, state) {
+      const remoteCar = gameState.remoteCars.find((car) => car.onlinePlayerId === playerId);
+      if (!remoteCar || !state) {
+        return;
+      }
+
+      remoteCar.networkTargetPosition = new THREE.Vector3(state.x, state.y, state.z);
+      remoteCar.networkTargetYaw = state.yaw;
+      remoteCar.completedLaps = state.completedLaps || 0;
+      remoteCar.nextCheckpointIndex = state.nextCheckpointIndex || 0;
+      remoteCar.trackProgress = state.trackProgress || 0;
+      remoteCar.absoluteProgress = state.absoluteProgress || 0;
+      remoteCar.finished = Boolean(state.finished);
+      remoteCar.finishTime = state.finishTime || 0;
+      remoteCar.velocity.copy(getForwardVector(state.yaw)).multiplyScalar(state.speed || 0);
+      computeRanking();
+    },
+    updateRemoteCars(dt) {
+      const lerpFactor = 1 - Math.exp(-CONFIG.online.remoteLerpSharpness * dt);
+      for (const remoteCar of gameState.remoteCars) {
+        if (!remoteCar.networkTargetPosition) {
+          continue;
+        }
+        remoteCar.mesh.position.lerp(remoteCar.networkTargetPosition, lerpFactor);
+        remoteCar.yaw = lerpAngle(remoteCar.yaw, remoteCar.networkTargetYaw ?? remoteCar.yaw, lerpFactor);
+        updateCarVisualAnimation(remoteCar, dt);
+        applyCarVisualTransform(remoteCar);
+      }
+    },
+    async finishRace(player) {
+      if (!this.isOnlineMode()) {
+        this.submitStatus = "单机模式未上传在线成绩。";
+        return;
+      }
+
+      try {
+        await this.requestJson("leaderboard", {
+          method: "POST",
+          body: {
+            playerName: this.getPlayerName(),
+            trackId: gameState.selectedTrackId,
+            trackLabel: gameState.trackConfig?.label ?? "霓虹环线",
+            difficultyId: gameState.selectedDifficultyId,
+            difficultyLabel: gameState.difficultyConfig?.label ?? "进阶",
+            weatherId: gameState.selectedWeatherId,
+            weatherLabel: gameState.weatherConfig?.label ?? "白天",
+            totalTime: player.finishTime,
+            bestLap: player.lapTimes.length > 0 ? Math.min(...player.lapTimes) : null,
+          },
+        });
+        this.submitStatus = "在线成绩已同步。";
+        await this.refreshLeaderboard();
+      } catch (error) {
+        this.submitStatus = `在线成绩同步失败：${error.message}`;
+      }
+    },
+    renderResultBoard() {
+      if (ui.onlineResultStatus) {
+        ui.onlineResultStatus.textContent = this.submitStatus;
+      }
+      this.renderLeaderboardLists();
+    },
+    afterRaceReturnToLobby() {
+      this.submitStatus = this.isOnlineMode()
+        ? this.room.connected
+          ? "已返回房间，可等待房主重新开始。"
+          : "在线连接已断开。"
+        : "在线成绩尚未同步。";
+      this.renderResultBoard();
+      this.updateStartButtonState();
+      this.updateSelectionLocks();
+    },
+    leaveRoom(keepOnlineMode) {
+      const roomId = this.room.roomId;
+      const playerId = this.room.playerId;
+      if (roomId && playerId) {
+        this.requestJson("rooms/leave", {
+          method: "POST",
+          body: {
+            roomId,
+            playerId,
+          },
+        }).catch(() => {
+          // 离房通知失败时仍然优先完成本地清理，避免界面残留旧房间状态。
+        });
+      }
+      this.disconnectSocket();
+      this.room = {
+        apiBase: this.normalizeApiBase(ui.onlineApiInput?.value || CONFIG.online.defaultApiBase),
+        roomId: "",
+        playerId: "",
+        hostId: "",
+        players: [],
+        status: "idle",
+        connected: false,
+        isHost: false,
+        config: null,
+      };
+      if (ui.onlineRoomInput) {
+        ui.onlineRoomInput.value = "";
+      }
+      this.clearRemoteCars();
+      this.updateRoomMeta();
+      this.renderRoomMembers();
+      this.setStatus(keepOnlineMode ? "已离开房间。你可以创建新房间或重新加入。" : "单机模式下不会连接在线服务。");
+      if (!keepOnlineMode) {
+        gameState.selectedModeId = "local";
+      }
+      this.updateSelectionLocks();
+      this.updateStartButtonState();
+      this.renderResultBoard();
+    },
+  };
+}
+
 function createWeatherSystem() {
   return {
     apply(weatherId) {
@@ -992,6 +1834,9 @@ function createMiniMapSystem() {
 
       for (const car of gameState.aiCars) {
         drawCarDot(car, "rgba(255, 177, 104, 0.95)", 4);
+      }
+      for (const car of gameState.remoteCars) {
+        drawCarDot(car, "rgba(180, 140, 255, 0.96)", 4.5);
       }
       drawCarDot(gameState.player, "rgba(94, 231, 255, 1)", 5.5);
     },
@@ -2158,6 +3003,15 @@ function createModelSystem() {
               material.emissive.setHex(0x234868);
             }
           }
+
+          if (car.type === "remote") {
+            material.transparent = true;
+            material.opacity = 0.72;
+            if ("emissive" in material) {
+              material.emissive.setHex(0x35265b);
+              material.emissiveIntensity = 1.15;
+            }
+          }
         }
       });
     },
@@ -2391,8 +3245,9 @@ function rebuildAIField() {
   const preset = gameState.difficultyConfig ?? CONFIG.difficulties.expert;
   const colors = [0xff576d, 0x4db8ff, 0xffcc4d, 0x74f0a7, 0xb08cff, 0xff7fb2, 0x62e5d7];
   const aiCars = [];
+  const aiCount = onlineSystem.isOnlineMode() ? 0 : preset.aiCount;
 
-  for (let index = 0; index < preset.aiCount; index += 1) {
+  for (let index = 0; index < aiCount; index += 1) {
     const car = createCar("ai", colors[index % colors.length], buildAIName(index));
     car.aiSettings = buildAISettings(preset, index);
     car.physicsProfile = buildAIPhysicsProfile(preset, index);
@@ -2496,6 +3351,7 @@ function setupInput() {
 function startCountdown() {
   rebuildAIField();
   resetRace();
+  onlineSystem.prepareRoomRace();
   ghostSystem.prepareForRace();
   itemSystem.resetForRace();
   gameState.status = "countdown";
@@ -2544,6 +3400,7 @@ function updateGame(dt) {
   }
 
   soundSystem.update(dt);
+  onlineSystem.update(dt);
 
   if (gameState.status === "countdown") {
     updateCountdown(dt);
@@ -2943,6 +3800,7 @@ function finishRace() {
   }
   ghostSystem.finishRun(gameState.player);
   saveSystem.updateRecords(gameState.player);
+  onlineSystem.finishRace(gameState.player);
   computeRanking();
   gameState.results = [...gameState.standings];
   ui.resultScreen.classList.remove("hidden");
@@ -2952,7 +3810,7 @@ function finishRace() {
 
 // 排名严格遵循：完成圈数 > 检查点 > 当前赛段进度 > 完赛时间。
 function computeRanking() {
-  gameState.standings = [...gameState.cars].sort((left, right) => {
+  gameState.standings = [...gameState.cars, ...gameState.remoteCars].sort((left, right) => {
     if (left.finished && right.finished && left.finishTime !== right.finishTime) {
       return left.finishTime - right.finishTime;
     }
@@ -2997,7 +3855,8 @@ function renderHUD() {
 
   const currentLap = player.finished ? CONFIG.totalLaps : Math.min(CONFIG.totalLaps, player.completedLaps + 1);
   const lapText = `${currentLap} / ${CONFIG.totalLaps}`;
-  const positionText = `第 ${player.rank} / ${gameState.cars.length} 名`;
+  const totalOpponents = gameState.standings.length > 0 ? gameState.standings.length : gameState.cars.length;
+  const positionText = `第 ${player.rank} / ${totalOpponents} 名`;
   const speedKmh = Math.round(player.velocity.length() * 3.6);
   const speedText = `${speedKmh} km/h`;
   const timeText = formatTime(gameState.elapsedTime);
@@ -3019,6 +3878,8 @@ function renderHUD() {
   ui.difficultyValue.textContent = gameState.difficultyConfig?.label ?? "进阶";
   ui.weatherValue.textContent = gameState.weatherConfig?.label ?? "白天";
   ui.trackValue.textContent = gameState.trackConfig?.label ?? "霓虹环线";
+  ui.modeValue.textContent = onlineSystem.isOnlineMode() ? "在线" : "单机";
+  ui.roomValue.textContent = onlineSystem.isOnlineMode() ? (onlineSystem.room.roomId || "等待加入") : "无";
   ui.statusValue.textContent = statusText;
   ui.statusValue.dataset.tone = getStatusTone(player, boostActive, driftActive);
   if (ui.hudSupportText) {
@@ -3081,11 +3942,12 @@ function showResults() {
   ui.resultTitle.textContent = `你获得了第 ${player.rank} 名`;
   ui.resultSummary.textContent =
     `${gameState.trackConfig?.label ?? "霓虹环线"} · ${gameState.difficultyConfig?.label ?? "进阶"}难度 · ${gameState.weatherConfig?.label ?? "白天"}环境，总用时 ` +
-    `${formatTime(player.finishTime || gameState.elapsedTime)}，本场共有 ${gameState.cars.length} 辆赛车。`;
+    `${formatTime(player.finishTime || gameState.elapsedTime)}，本场共有 ${gameState.standings.length || gameState.cars.length} 辆赛车。`;
   ui.recordBestTotal.textContent = `最佳总成绩：${saveSystem.getBestTotalLabel()}`;
   ui.recordBestLap.textContent = `最快单圈：${saveSystem.getBestLapLabel()}`;
   ui.recordFlags.textContent = saveSystem.getRecordFlagText();
   saveSystem.renderBoards();
+  onlineSystem.renderResultBoard();
 
   ui.resultList.innerHTML = "";
   for (const car of gameState.results) {
@@ -3118,7 +3980,14 @@ function showResults() {
 
     const tag = document.createElement("span");
     tag.className = "result-item-tag";
-    tag.textContent = car === player ? "玩家" : car.rank === 1 ? "头名" : "对手";
+    tag.textContent =
+      car === player
+        ? "玩家"
+        : car.type === "remote"
+          ? "联机"
+          : car.rank === 1
+            ? "头名"
+            : "对手";
 
     main.append(name, meta);
     item.append(badge, main, tag);
@@ -3866,6 +4735,13 @@ function handleResize() {
   gameState.camera.updateProjectionMatrix();
   gameState.renderer.setSize(window.innerWidth, window.innerHeight);
   minimapSystem.render();
+}
+
+function sanitizePlayerName(value) {
+  return String(value || "玩家")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 18) || "玩家";
 }
 
 function formatTime(seconds) {
