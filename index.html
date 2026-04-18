@@ -282,25 +282,27 @@
         <p id="record-best-lap" class="record-line">最快单圈：暂无</p>
         <p id="record-flags" class="record-line record-line-highlight"></p>
       </div>
-      <div class="results-columns">
-        <div class="results-column">
-          <h3>最终排名</h3>
-          <ol id="result-list" class="result-list"></ol>
+      <div class="results-scroll-area">
+        <div class="results-stack">
+          <div class="results-column results-section-card">
+            <h3>最终排名</h3>
+            <ol id="result-list" class="result-list"></ol>
+          </div>
+          <div class="record-board history-board">
+            <h3>本地排行榜</h3>
+            <ul id="history-list" class="mini-leaderboard-list"></ul>
+          </div>
         </div>
-        <div class="results-column">
-          <h3>玩家分段</h3>
-          <ul id="lap-time-list" class="lap-time-list"></ul>
-        </div>
-      </div>
-      <div class="results-history-grid">
-        <div class="record-board history-board">
-          <h3>本地排行榜</h3>
-          <ul id="history-list" class="mini-leaderboard-list"></ul>
-        </div>
-        <div class="record-board history-board">
-          <h3>在线排行榜</h3>
-          <p id="online-result-status" class="record-line">在线成绩尚未同步。</p>
-          <ul id="online-result-list" class="mini-leaderboard-list"></ul>
+        <div class="results-stack">
+          <div class="results-column results-section-card">
+            <h3>玩家分段</h3>
+            <ul id="lap-time-list" class="lap-time-list"></ul>
+          </div>
+          <div class="record-board history-board">
+            <h3>在线排行榜</h3>
+            <p id="online-result-status" class="record-line">在线成绩尚未同步。</p>
+            <ul id="online-result-list" class="mini-leaderboard-list"></ul>
+          </div>
         </div>
       </div>
       <button id="restart-button" class="primary-button" type="button">重新开始</button>
